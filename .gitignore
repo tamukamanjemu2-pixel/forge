@@ -1,0 +1,20 @@
+# Build directories
+cmake-build-*/
+build/
+
+# CLion
+.idea/
+
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Compiled binaries
+*.o
+*.a
+*.so
+*.dylib
