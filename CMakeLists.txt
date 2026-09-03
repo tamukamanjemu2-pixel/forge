@@ -21,7 +21,8 @@ add_library(forge_core
         src/tensor.cpp
 )
 
-target_include_directories(forge_core
+target_include_directories(
+        forge_core
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -32,9 +33,11 @@ target_include_directories(forge_core
 
 add_library(forge_cuda
         cuda/vector_add.cu
+        cuda/matmul.cu
 )
 
-target_include_directories(forge_cuda
+target_include_directories(
+        forge_cuda
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/cuda
 )
@@ -43,6 +46,30 @@ set_target_properties(
         forge_cuda
         PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
+)
+
+# --------------------------------------------------
+# Forge operators
+# --------------------------------------------------
+
+add_library(forge_ops
+        src/ops/matmul.cpp
+)
+
+target_include_directories(
+        forge_ops
+        PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/cuda
+)
+
+target_link_libraries(
+        forge_ops
+        PUBLIC
+        forge_core
+        PRIVATE
+        forge_cuda
 )
 
 # --------------------------------------------------
@@ -74,4 +101,16 @@ target_link_libraries(
         forge_tensor_test
         PRIVATE
         forge_core
+)
+
+add_executable(
+        forge_matmul_test
+        tests/matmul_test.cpp
+)
+
+target_link_libraries(
+        forge_matmul_test
+        PRIVATE
+        forge_ops
+        CUDA::cudart
 )
