@@ -19,10 +19,9 @@ void launch_vector_add(
     const float* d_a,
     const float* d_b,
     float* d_c,
-    int n
+    int n,
+    int threads_per_block
 ) {
-    constexpr int threads_per_block = 256;
-
     const int blocks =
         (n + threads_per_block - 1) / threads_per_block;
 

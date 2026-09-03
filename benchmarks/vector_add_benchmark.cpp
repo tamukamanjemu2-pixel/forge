@@ -2,35 +2,48 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <vector>
-#include <algorithm>
 
-#define CUDA_CHECK(call)                                             \
-    do {                                                             \
-        cudaError_t err = (call);                                   \
-        if (err != cudaSuccess) {                                   \
-            std::cerr << "CUDA error: " << cudaGetErrorString(err)   \
-                      << " at " << __FILE__ << ":" << __LINE__      \
-                      << '\n';                                      \
-            std::exit(EXIT_FAILURE);                                \
-        }                                                            \
+#define CUDA_CHECK(call)                                                   \
+    do {                                                                   \
+        cudaError_t error = call;                                          \
+        if (error != cudaSuccess) {                                        \
+            std::cerr << "CUDA error: "                                    \
+                      << cudaGetErrorString(error)                          \
+                      << " at " << __FILE__                                 \
+                      << ":" << __LINE__ << std::endl;                      \
+            std::exit(EXIT_FAILURE);                                       \
+        }                                                                  \
     } while (0)
 
-int main() {
-    constexpr int N = 1 << 24;
+struct BenchmarkResult {
+    int n;
+    int threads_per_block;
+    float kernel_ms;
+    double bandwidth_gbps;
+    float max_error;
+};
 
-    const size_t bytes = static_cast<size_t>(N) * sizeof(float);
+BenchmarkResult run_benchmark(
+    int n,
+    int threads_per_block,
+    int iterations
+) {
+    const std::size_t bytes =
+        static_cast<std::size_t>(n) * sizeof(float);
 
-    std::vector<float> h_a(N);
-    std::vector<float> h_b(N);
-    std::vector<float> h_c(N);
+    std::vector<float> h_a(n);
+    std::vector<float> h_b(n);
+    std::vector<float> h_c(n);
 
-    for (int i = 0; i < N; ++i) {
-        h_a[i] = static_cast<float>(i);
-        h_b[i] = static_cast<float>(2 * i);
+    for (int i = 0; i < n; ++i) {
+        h_a[i] = static_cast<float>(i) * 0.5f;
+        h_b[i] = static_cast<float>(i) * 0.25f;
     }
 
     float* d_a = nullptr;
@@ -42,17 +55,32 @@ int main() {
     CUDA_CHECK(cudaMalloc(&d_c, bytes));
 
     CUDA_CHECK(cudaMemcpy(
-        d_a, h_a.data(), bytes, cudaMemcpyHostToDevice));
+        d_a,
+        h_a.data(),
+        bytes,
+        cudaMemcpyHostToDevice
+    ));
 
     CUDA_CHECK(cudaMemcpy(
-        d_b, h_b.data(), bytes, cudaMemcpyHostToDevice));
+        d_b,
+        h_b.data(),
+        bytes,
+        cudaMemcpyHostToDevice
+    ));
 
-    // Warm-up
-    launch_vector_add(d_a, d_b, d_c, N);
-    CUDA_CHECK(cudaGetLastError());
+    // Warmup
+    for (int i = 0; i < 10; ++i) {
+        launch_vector_add(
+            d_a,
+            d_b,
+            d_c,
+            n,
+            threads_per_block
+        );
+    }
+
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    constexpr int iterations = 100;
+    CUDA_CHECK(cudaGetLastError());
 
     cudaEvent_t start;
     cudaEvent_t stop;
@@ -63,54 +91,67 @@ int main() {
     CUDA_CHECK(cudaEventRecord(start));
 
     for (int i = 0; i < iterations; ++i) {
-        launch_vector_add(d_a, d_b, d_c, N);
+        launch_vector_add(
+            d_a,
+            d_b,
+            d_c,
+            n,
+            threads_per_block
+        );
     }
 
     CUDA_CHECK(cudaEventRecord(stop));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
-    float elapsed_ms = 0.0f;
+    float total_ms = 0.0f;
 
-    CUDA_CHECK(cudaEventElapsedTime(
-        &elapsed_ms,
-        start,
-        stop));
+    CUDA_CHECK(
+        cudaEventElapsedTime(
+            &total_ms,
+            start,
+            stop
+        )
+    );
 
-    const double kernel_ms =
-        elapsed_ms / iterations;
+    const float kernel_ms =
+        total_ms / static_cast<float>(iterations);
 
     CUDA_CHECK(cudaMemcpy(
         h_c.data(),
         d_c,
         bytes,
-        cudaMemcpyDeviceToHost));
+        cudaMemcpyDeviceToHost
+    ));
 
-    // Correctness check
     float max_error = 0.0f;
 
-    for (int i = 0; i < N; ++i) {
-        const float expected = h_a[i] + h_b[i];
-        max_error = std::max(
-            max_error,
-            std::abs(h_c[i] - expected));
+    for (int i = 0; i < n; ++i) {
+        const float expected =
+            h_a[i] + h_b[i];
+
+        max_error =
+            std::max(
+                max_error,
+                std::abs(h_c[i] - expected)
+            );
     }
 
+    //
     // Vector add:
-    // 2 reads + 1 write = 3 * sizeof(float) bytes/element
-    const double bytes_moved =
+    //
+    // read A  -> bytes
+    // read B  -> bytes
+    // write C -> bytes
+    //
+    // total traffic = 3 * bytes
+    //
+    const double transferred_bytes =
         3.0 * static_cast<double>(bytes);
 
     const double bandwidth_gbps =
-        (bytes_moved / (kernel_ms / 1000.0)) /
+        transferred_bytes /
+        (kernel_ms / 1000.0) /
         1e9;
-
-    std::cout << "N: " << N << '\n';
-    std::cout << "Kernel time: "
-              << kernel_ms << " ms\n";
-    std::cout << "Effective bandwidth: "
-              << bandwidth_gbps << " GB/s\n";
-    std::cout << "Max error: "
-              << max_error << '\n';
 
     CUDA_CHECK(cudaEventDestroy(start));
     CUDA_CHECK(cudaEventDestroy(stop));
@@ -119,7 +160,117 @@ int main() {
     CUDA_CHECK(cudaFree(d_b));
     CUDA_CHECK(cudaFree(d_c));
 
-    return max_error == 0.0f
-        ? EXIT_SUCCESS
-        : EXIT_FAILURE;
+    return {
+        n,
+        threads_per_block,
+        kernel_ms,
+        bandwidth_gbps,
+        max_error
+    };
+}
+
+int main() {
+    const std::vector<int> problem_sizes = {
+        1 << 20,
+        1 << 22,
+        1 << 24,
+        1 << 26
+    };
+
+    const std::vector<int> block_sizes = {
+        64,
+        128,
+        256,
+        512,
+        1024
+    };
+
+    constexpr int iterations = 100;
+
+    int device = 0;
+
+    CUDA_CHECK(cudaSetDevice(device));
+
+    cudaDeviceProp properties{};
+
+    CUDA_CHECK(
+        cudaGetDeviceProperties(
+            &properties,
+            device
+        )
+    );
+
+    std::cout
+        << "Forge Vector Add Benchmark\n\n";
+
+    std::cout
+        << "GPU: "
+        << properties.name
+        << '\n';
+
+    std::cout
+        << "Compute capability: "
+        << properties.major
+        << "."
+        << properties.minor
+        << '\n';
+
+    std::cout
+        << "Iterations: "
+        << iterations
+        << "\n\n";
+
+    std::cout
+        << std::left
+        << std::setw(14) << "N"
+        << std::setw(12) << "Threads"
+        << std::setw(16) << "Kernel (ms)"
+        << std::setw(20) << "Bandwidth (GB/s)"
+        << std::setw(12) << "Max Error"
+        << '\n';
+
+    std::cout
+        << std::string(74, '-')
+        << '\n';
+
+    for (const int n : problem_sizes) {
+        for (const int threads : block_sizes) {
+
+            if (threads >
+                properties.maxThreadsPerBlock) {
+                continue;
+            }
+
+            const BenchmarkResult result =
+                run_benchmark(
+                    n,
+                    threads,
+                    iterations
+                );
+
+            std::cout
+                << std::left
+                << std::setw(14)
+                << result.n
+                << std::setw(12)
+                << result.threads_per_block
+                << std::setw(16)
+                << std::fixed
+                << std::setprecision(4)
+                << result.kernel_ms
+                << std::setw(20)
+                << std::fixed
+                << std::setprecision(2)
+                << result.bandwidth_gbps
+                << std::setw(12)
+                << result.max_error
+                << '\n';
+        }
+
+        std::cout << '\n';
+    }
+
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    return 0;
 }
