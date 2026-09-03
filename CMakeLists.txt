@@ -23,3 +23,15 @@ target_include_directories(forge_cuda
 set_target_properties(forge_cuda PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
 )
+
+find_package(CUDAToolkit REQUIRED)
+
+add_executable(forge_vector_add
+        benchmarks/vector_add_benchmark.cpp
+)
+
+target_link_libraries(forge_vector_add
+        PRIVATE
+        forge_cuda
+        CUDA::cudart
+)
