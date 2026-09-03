@@ -11,6 +11,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+# Default target for our current benchmark hardware:
+# NVIDIA Tesla T4 = compute capability 7.5.
+#
+# Can be overridden later:
+# cmake -DCMAKE_CUDA_ARCHITECTURES=...
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 75)
+endif()
+
 find_package(CUDAToolkit REQUIRED)
 
 # --------------------------------------------------
@@ -42,10 +51,10 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/cuda
 )
 
-set_target_properties(
+target_link_libraries(
         forge_cuda
-        PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
+        PUBLIC
+        CUDA::cudart
 )
 
 # --------------------------------------------------
@@ -85,7 +94,6 @@ target_link_libraries(
         forge_vector_add
         PRIVATE
         forge_cuda
-        CUDA::cudart
 )
 
 # --------------------------------------------------
@@ -112,5 +120,5 @@ target_link_libraries(
         forge_matmul_test
         PRIVATE
         forge_ops
-        CUDA::cudart
+        forge_cuda
 )
