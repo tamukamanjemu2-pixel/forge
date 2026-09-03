@@ -122,3 +122,15 @@ target_link_libraries(
         forge_ops
         forge_cuda
 )
+
+add_executable(
+        forge_matmul_benchmark
+        benchmarks/matmul_benchmark.cpp
+)
+
+target_link_libraries(
+        forge_matmul_benchmark
+        PRIVATE
+        forge_ops
+        forge_cuda
+)
