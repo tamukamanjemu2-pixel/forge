@@ -13,6 +13,23 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 find_package(CUDAToolkit REQUIRED)
 
+# --------------------------------------------------
+# Forge core runtime
+# --------------------------------------------------
+
+add_library(forge_core
+        src/tensor.cpp
+)
+
+target_include_directories(forge_core
+        PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# --------------------------------------------------
+# CUDA backend
+# --------------------------------------------------
+
 add_library(forge_cuda
         cuda/vector_add.cu
 )
@@ -28,6 +45,10 @@ set_target_properties(
         CUDA_SEPARABLE_COMPILATION ON
 )
 
+# --------------------------------------------------
+# Benchmarks
+# --------------------------------------------------
+
 add_executable(
         forge_vector_add
         benchmarks/vector_add_benchmark.cpp
@@ -38,4 +59,19 @@ target_link_libraries(
         PRIVATE
         forge_cuda
         CUDA::cudart
+)
+
+# --------------------------------------------------
+# Tests
+# --------------------------------------------------
+
+add_executable(
+        forge_tensor_test
+        tests/tensor_test.cpp
+)
+
+target_link_libraries(
+        forge_tensor_test
+        PRIVATE
+        forge_core
 )
