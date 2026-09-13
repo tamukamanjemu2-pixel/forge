@@ -1,62 +1,38 @@
 # Forge
 
-**A from-scratch C++/CUDA inference-runtime project focused on GPU execution, correctness, and measurable performance.**
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, managed storage, fusion, FP16, and Tensor Core execution are future milestones.
 
-Forge is being built layer by layer—from tensors and CUDA kernels to operators, execution scheduling, memory reuse, and mixed-precision inference. The repository keeps baseline implementations and benchmark evidence visible so each optimization can be measured rather than assumed.
+## Build and test on macOS
 
-## Current implementation
+This builds and tests host metadata only. It does not simulate CUDA or provide CPU operator execution.
 
-- C++20 tensor abstraction with CPU and CUDA storage
-- Host-to-device and device-to-host tensor transfers
-- CUDA vector-add kernel and benchmark
-- CUDA matrix-multiplication kernel
-- Matrix-multiplication operator dispatch
-- Tensor and matrix-multiplication correctness tests
-- Separate CMake targets for runtime, CUDA backend, operators, tests, and benchmarks
-
-## Architecture
-
-```mermaid
-flowchart TB
-    API["Tensor and operator API"] --> CORE["Forge core runtime"]
-    API --> OPS["Operator dispatch"]
-    CORE --> MEM["CPU / CUDA storage"]
-    OPS --> CUDA["CUDA kernels"]
-    CUDA --> GPU["NVIDIA GPU"]
-    TESTS["Correctness tests"] --> CORE
-    TESTS --> OPS
-    BENCH["Benchmarks"] --> CUDA
+```sh
+cmake -S . -B build/host-release -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host-release -j
+ctest --test-dir build/host-release --output-on-failure
 ```
 
-## Build
+In CLion, add `-DFORGE_ENABLE_CUDA=OFF` to the macOS CMake profile.
 
-Requirements:
+## Build and test on NVIDIA hardware
 
-- CMake 3.24+
-- A C++20 compiler
-- NVIDIA CUDA Toolkit
-- CUDA-capable NVIDIA GPU
+Requires CMake 3.24+, a C++20 compiler, and a compatible NVIDIA CUDA Toolkit. CUDA remains enabled by default. Architecture 75 targets the Tesla T4; override it for other hardware. Use a separate build directory from the host build.
 
-The default CUDA architecture is compute capability 7.5 (Tesla T4). Override `CMAKE_CUDA_ARCHITECTURES` for other GPUs.
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+```sh
+cmake -S . -B build/cuda -DFORGE_ENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=75
+cmake --build build/cuda -j
+ctest --test-dir build/cuda --output-on-failure
+./build/cuda/forge_vector_add
+./build/cuda/forge_matmul_benchmark
 ```
 
-Run correctness tests:
+`-DBUILD_TESTING=OFF` omits test executables. GPU benchmarks are available only with CUDA enabled.
 
-```bash
-./build/forge_tensor_test
-./build/forge_matmul_test
-```
+## Measurement discipline
 
-Run benchmarks:
+No new GPU measurements have been collected for milestone 1. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
 
-```bash
-./build/forge_vector_add
-./build/forge_matmul_benchmark
-```
+See `docs/architecture.md` and `docs/milestones/001-host-foundation.md`.
 
 ## Baseline results
 
@@ -97,7 +73,8 @@ forge/
 
 ## Roadmap
 
-- [x] Tensor abstraction and CPU/CUDA memory transfers
+- [x] Non-owning tensor metadata and caller-managed CPU/CUDA storage
+- [x] Host-only build and validated metadata tests
 - [x] Vector-add baseline and bandwidth benchmark
 - [x] Naive GEMM baseline, operator, tests, and benchmark
 - [ ] Shared-memory tiled GEMM

@@ -27,6 +27,7 @@ namespace forge {
         bool operator==(const Device& other) const = default;
     };
 
+    // Non-owning contiguous tensor view. The caller owns storage and its lifetime.
     class Tensor {
     public:
         Tensor(
@@ -71,6 +72,8 @@ namespace forge {
         Device device_;
 
         void* data_;
+        std::size_t numel_;
+        std::size_t nbytes_;
     };
 
 } // namespace forge

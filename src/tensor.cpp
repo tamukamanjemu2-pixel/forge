@@ -33,13 +33,22 @@ Tensor::Tensor(
     void* data
 )
     : shape_(std::move(shape)),
-      strides_(compute_contiguous_strides(shape_)),
+      strides_(),
       dtype_(dtype),
       device_(device),
-      data_(data) {
-
-    // Force validation during construction.
-    (void)compute_numel(shape_);
+      data_(data),
+      numel_(compute_numel(shape_)),
+      nbytes_(0) {
+    const auto bytes_per_element = element_size(dtype_);
+    if (numel_ > std::numeric_limits<std::size_t>::max() / bytes_per_element) {
+        throw std::overflow_error("Tensor byte size overflow");
+    }
+    if ((device_.type != DeviceType::CPU && device_.type != DeviceType::CUDA) ||
+        device_.index < 0 || (device_.type == DeviceType::CPU && device_.index != 0)) {
+        throw std::invalid_argument("Invalid tensor device");
+    }
+    nbytes_ = numel_ * bytes_per_element;
+    strides_ = compute_contiguous_strides(shape_);
 }
 
 const std::vector<std::int64_t>&
@@ -57,11 +66,11 @@ std::size_t Tensor::ndim() const noexcept {
 }
 
 std::size_t Tensor::numel() const noexcept {
-    return compute_numel(shape_);
+    return numel_;
 }
 
 std::size_t Tensor::nbytes() const noexcept {
-    return numel() * element_size(dtype_);
+    return nbytes_;
 }
 
 DataType Tensor::dtype() const noexcept {
@@ -85,7 +94,8 @@ void Tensor::set_data(void* data) noexcept {
 }
 
 bool Tensor::is_contiguous() const noexcept {
-    return strides_ == compute_contiguous_strides(shape_);
+    // All supported constructors produce contiguous metadata.
+    return true;
 }
 
 std::size_t Tensor::element_size(DataType dtype) {
@@ -117,8 +127,10 @@ Tensor::compute_contiguous_strides(
     }
 
     for (std::size_t i = shape.size(); i-- > 1;) {
-        strides[i - 1] =
-            strides[i] * shape[i];
+        if (strides[i] > std::numeric_limits<std::int64_t>::max() / shape[i]) {
+            throw std::overflow_error("Tensor stride overflow");
+        }
+        strides[i - 1] = strides[i] * shape[i];
     }
 
     return strides;
