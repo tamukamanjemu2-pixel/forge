@@ -30,7 +30,7 @@ ctest --test-dir build/cuda --output-on-failure
 
 ## Measurement discipline
 
-The user-run CUDA 12.8.93 / GCC 13.3.0 build passed all four tests for milestone 2. Milestone 3 CUDA validation is pending. No new GPU performance measurements have been collected for milestones 1–3. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
+The user-run CUDA 12.8.93 / GCC 13.3.0 build passed all four tests for milestone 2. The subsequent milestone 3 CUDA build also succeeded and passed all five tests, including operator_validation and the expanded matmul_cuda suite. No new GPU performance measurements have been collected for milestones 1–3. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
 
 See `docs/architecture.md` and `docs/milestones/` for implementation and validation checkpoints.
 

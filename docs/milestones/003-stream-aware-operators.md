@@ -31,7 +31,7 @@ cmake --build build/host-release -j
 ctest --test-dir build/host-release --output-on-failure --timeout 20
 ```
 
-CUDA compilation and the expanded GPU suite: NOT YET RUN. Large-index arithmetic is fixed in source but enormous allocations were not exercised. Multi-GPU checks report a skip when fewer than two devices are available. Performance: NOT YET MEASURED. Prior milestone test results do not validate this changed backend.
+User-supplied NVIDIA build/test output confirms successful compilation of the changed CUDA kernels, stream implementation, operators, benchmarks, and tests. CTest passed 5/5: tensor_metadata, memory_cpu, operator_validation, matmul_cuda, memory_cuda. The two GPU-labelled tests passed. Total CTest duration was 0.55 seconds; this is test-suite elapsed time, not inference latency. Large-index arithmetic is fixed in source but enormous allocations were not exercised. Multi-GPU checks report a skip when fewer than two devices are available. Performance: NOT YET MEASURED. This result validates the updated milestone 3 test suite. The supplied log does not include GPU model, device count, commit SHA, or successful test stdout, so execution of the optional multi-GPU branches is not confirmed.
 
 Run in the NVIDIA notebook after updating its checkout:
 
