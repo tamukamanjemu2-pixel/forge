@@ -12,11 +12,11 @@ All currently representable layouts are contiguous. Scalars have an empty shape 
 
 Graph validation and dependency ordering will precede lifetime analysis and memory planning. Runtime-owned storage will back borrowed tensor views; kernel selection and stream-aware execution will sit behind the operator API. This avoids coupling Tensor construction to cudaMalloc/cudaFree.
 
-The current backend still uses the default stream and requires callers to check execution errors and synchronize. These are known limitations for a later runtime/backend milestone, not completed features.
+MatMul supports both default-stream and explicit-stream dispatch. It checks launch errors without synchronizing; callers establish completion and detect asynchronous errors through Stream::synchronize() or the blocking copy API. The vector-add microbenchmark still uses its default-stream entry point.
 
 ## Build boundary
 
-`FORGE_ENABLE_CUDA=OFF` builds only the host core and its tests. CUDA stays enabled by default and requires the real toolkit. CTest registers metadata tests in both configurations and GPU MatMul tests only in CUDA configurations. There is no simulated CUDA backend.
+`FORGE_ENABLE_CUDA=OFF` builds the host core, operator validation, and host tests. Valid CUDA operator calls fail explicitly in this configuration. CUDA stays enabled by default and requires the real toolkit. CTest registers metadata tests in both configurations and GPU MatMul tests only in CUDA configurations. There is no simulated CUDA backend.
 
 ## Storage ownership (milestone 2)
 
@@ -26,6 +26,16 @@ A Buffer may provide several checked, element-aligned Tensor views using byte of
 
 `copy_tensor` validates shape, dtype, layout, and storage presence. CPU copies use memmove. CUDA copies select and restore the requested device, reject overlap and cross-GPU transfers, and synchronize the selected device before returning. The barrier is deliberately confined to the synchronous setup/readback API; it is not a future operator scheduling policy. Copies from work running on unrelated streams require callers to establish producer completion before invoking this API.
 
-CUDA errors on normal calls throw contextual runtime errors. Destructors report cleanup errors to stderr without throwing; a failed cleanup can leave a device allocation unreleased. The shared internal CUDA helper is in src/cuda_support.h. Existing microbenchmarks still retain their own error handling pending the backend milestone.
+CUDA errors on normal calls throw contextual runtime errors. Destructors report cleanup errors to stderr without throwing; a failed cleanup can leave a device allocation unreleased. The shared internal CUDA helper is in src/cuda_support.h. Both microbenchmarks and kernel launchers now use this shared error handling; benchmark timing methodology is otherwise retained.
 
 This is an allocation foundation, not a pool: allocations remain explicit and do not yet have reuse statistics or graph lifetime planning. Host-only builds reject CUDA allocation/copy requests instead of emulating them.
+
+## Stream-aware operators (milestone 3)
+
+`Stream` owns a non-blocking CUDA stream through a private implementation, keeping CUDA headers out of the public core headers. It is movable and not copyable. Moved-from objects reject use. Its device is immutable; synchronize, creation, and destruction select/restore that device. The native handle is borrowed interoperability access and must not be destroyed externally. Destruction does not promise work completion; storage lifetime remains the caller's responsibility.
+
+MatMul validates rank, Float32 dtype, CUDA device agreement, contiguous layout, inner/output dimensions, storage, integer dimension limits, and output/input overlap before dispatch. Read-only input/input overlap is allowed. Explicit streams must match the tensor device. The old API delegates to the same validation and uses the default stream on that device.
+
+The naive CUDA kernel retains one output per thread. Index multiplication now uses size_t and launch dimensions use overflow-safe ceiling division. The launcher checks device grid limits before enqueueing and checks the CUDA launch status immediately afterward. Grid attribute queries currently occur per launch; no host overhead or kernel speedup is claimed. Rebenchmark before comparing performance with the historical baseline.
+
+No implicit per-operator synchronization was added. Event-based dependencies, asynchronous copy APIs, pooling, kernel selection, and graph scheduling remain future milestones.

@@ -1,3 +1,4 @@
+#include "../src/cuda_support.h"
 #include "forge/ops/matmul.h"
 #include "forge/tensor.h"
 
@@ -8,22 +9,6 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-
-#define CUDA_CHECK(call)                                      \
-    do {                                                      \
-        const cudaError_t error = (call);                     \
-        if (error != cudaSuccess) {                           \
-            std::cerr                                         \
-                << "CUDA error: "                             \
-                << cudaGetErrorString(error)                  \
-                << " at "                                     \
-                << __FILE__                                   \
-                << ":"                                        \
-                << __LINE__                                   \
-                << '\n';                                      \
-            std::exit(EXIT_FAILURE);                          \
-        }                                                     \
-    } while (0)
 
 struct BenchmarkResult {
     int size;
@@ -52,11 +37,11 @@ BenchmarkResult run_benchmark(
     float* d_b = nullptr;
     float* d_c = nullptr;
 
-    CUDA_CHECK(cudaMalloc(&d_a, bytes));
-    CUDA_CHECK(cudaMalloc(&d_b, bytes));
-    CUDA_CHECK(cudaMalloc(&d_c, bytes));
+    FORGE_CUDA_CHECK(cudaMalloc(&d_a, bytes));
+    FORGE_CUDA_CHECK(cudaMalloc(&d_b, bytes));
+    FORGE_CUDA_CHECK(cudaMalloc(&d_c, bytes));
 
-    CUDA_CHECK(
+    FORGE_CUDA_CHECK(
         cudaMemcpy(
             d_a,
             h_a.data(),
@@ -65,7 +50,7 @@ BenchmarkResult run_benchmark(
         )
     );
 
-    CUDA_CHECK(
+    FORGE_CUDA_CHECK(
         cudaMemcpy(
             d_b,
             h_b.data(),
@@ -100,27 +85,27 @@ BenchmarkResult run_benchmark(
         forge::matmul(a, b, c);
     }
 
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
+    FORGE_CUDA_CHECK(cudaGetLastError());
+    FORGE_CUDA_CHECK(cudaDeviceSynchronize());
 
     cudaEvent_t start;
     cudaEvent_t stop;
 
-    CUDA_CHECK(cudaEventCreate(&start));
-    CUDA_CHECK(cudaEventCreate(&stop));
+    FORGE_CUDA_CHECK(cudaEventCreate(&start));
+    FORGE_CUDA_CHECK(cudaEventCreate(&stop));
 
-    CUDA_CHECK(cudaEventRecord(start));
+    FORGE_CUDA_CHECK(cudaEventRecord(start));
 
     for (int i = 0; i < iterations; ++i) {
         forge::matmul(a, b, c);
     }
 
-    CUDA_CHECK(cudaEventRecord(stop));
-    CUDA_CHECK(cudaEventSynchronize(stop));
+    FORGE_CUDA_CHECK(cudaEventRecord(stop));
+    FORGE_CUDA_CHECK(cudaEventSynchronize(stop));
 
     float total_ms = 0.0f;
 
-    CUDA_CHECK(
+    FORGE_CUDA_CHECK(
         cudaEventElapsedTime(
             &total_ms,
             start,
@@ -151,12 +136,12 @@ BenchmarkResult run_benchmark(
         (kernel_ms / 1000.0) /
         1e9;
 
-    CUDA_CHECK(cudaEventDestroy(start));
-    CUDA_CHECK(cudaEventDestroy(stop));
+    FORGE_CUDA_CHECK(cudaEventDestroy(start));
+    FORGE_CUDA_CHECK(cudaEventDestroy(stop));
 
-    CUDA_CHECK(cudaFree(d_a));
-    CUDA_CHECK(cudaFree(d_b));
-    CUDA_CHECK(cudaFree(d_c));
+    FORGE_CUDA_CHECK(cudaFree(d_a));
+    FORGE_CUDA_CHECK(cudaFree(d_b));
+    FORGE_CUDA_CHECK(cudaFree(d_c));
 
     return {
         size,
@@ -177,7 +162,7 @@ int main() {
 
     cudaDeviceProp properties{};
 
-    CUDA_CHECK(
+    FORGE_CUDA_CHECK(
         cudaGetDeviceProperties(
             &properties,
             0

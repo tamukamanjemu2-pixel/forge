@@ -1,10 +1,10 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers and synchronous copies, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
-This builds and tests host metadata and CPU storage/copies only. It does not simulate CUDA or provide CPU operator execution.
+This builds and tests host metadata, CPU storage/copies, and operator validation only. It does not simulate CUDA or provide CPU operator execution.
 
 ```sh
 cmake -S . -B build/host-release -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
@@ -30,7 +30,7 @@ ctest --test-dir build/cuda --output-on-failure
 
 ## Measurement discipline
 
-The user-run CUDA 12.8.93 / GCC 13.3.0 build passed all four tests for milestone 2. No new GPU performance measurements have been collected for milestones 1–2. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
+The user-run CUDA 12.8.93 / GCC 13.3.0 build passed all four tests for milestone 2. Milestone 3 CUDA validation is pending. No new GPU performance measurements have been collected for milestones 1–3. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
 
 See `docs/architecture.md` and `docs/milestones/` for implementation and validation checkpoints.
 
@@ -109,4 +109,18 @@ auto tensor = storage.view({4, 8}, forge::DataType::Float32);
 // Keep storage alive until all uses of tensor have completed.
 ```
 
-`Buffer` also accepts `Device::cuda(index)` in CUDA builds. `copy_tensor(source, destination)` requires matching shape and dtype and completes synchronously. CPU buffers are 64-byte aligned. Views validate capacity and element alignment. CUDA transfers are intended for setup/readback; asynchronous runtime execution and pooling are not implemented yet.
+`Buffer` also accepts `Device::cuda(index)` in CUDA builds. `copy_tensor(source, destination)` requires matching shape and dtype and completes synchronously. CPU buffers are 64-byte aligned. Views validate capacity and element alignment. CUDA transfers are intended for setup/readback; stream-aware MatMul is available separately; graph scheduling, asynchronous transfer APIs, and pooling are not implemented yet.
+
+## Explicit CUDA stream execution
+
+```cpp
+#include "forge/stream.h"
+#include "forge/ops/matmul.h"
+
+forge::Stream stream(a.device());
+forge::matmul(a, b, output, stream);
+stream.synchronize();
+// It is now safe to read back output with copy_tensor or release its storage.
+```
+
+The existing `matmul(a, b, output)` overload still enqueues on the tensor device's default stream. Neither overload synchronizes after launch. An explicit Stream uses a non-blocking CUDA stream and must belong to the tensors' device. Keep storage alive until completion, and synchronize before reading results with the blocking copy API. Launch failures throw immediately; execution failures can surface at synchronization. Stream destruction releases the handle but is not a completion/error-checking substitute for `synchronize()`.

@@ -1,13 +1,18 @@
 #include "forge/ops/matmul.h"
 
+#include "forge/stream.h"
+#ifdef FORGE_HAS_CUDA
 #include "matmul.h"
+#include "../cuda_support.h"
+#endif
 
 #include <limits>
 #include <stdexcept>
 
 namespace forge {
 
-void matmul(
+namespace {
+void validate_matmul(
     const Tensor& a,
     const Tensor& b,
     Tensor& output
@@ -106,14 +111,35 @@ void matmul(
         );
     }
 
-    launch_matmul(
-        static_cast<const float*>(a.data()),
-        static_cast<const float*>(b.data()),
-        static_cast<float*>(output.data()),
-        static_cast<int>(m),
-        static_cast<int>(n),
-        static_cast<int>(k)
-    );
+    const auto overlaps = [](const Tensor& x, const Tensor& y) {
+        const auto xp = reinterpret_cast<std::uintptr_t>(x.data());
+        const auto yp = reinterpret_cast<std::uintptr_t>(y.data());
+        return xp <= yp ? yp - xp < x.nbytes() : xp - yp < y.nbytes();
+    };
+    if (overlaps(a, output) || overlaps(b, output))
+        throw std::invalid_argument("MatMul output must not overlap either input");
 }
 
+void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* stream) {
+    validate_matmul(a, b, output);
+    if (stream && stream->device() != a.device())
+        throw std::invalid_argument("MatMul stream and tensors must be on the same device");
+#ifdef FORGE_HAS_CUDA
+    detail::DeviceScope scope(a.device().index);
+    launch_matmul(static_cast<const float*>(a.data()), static_cast<const float*>(b.data()),
+                  static_cast<float*>(output.data()), static_cast<int>(a.shape()[0]),
+                  static_cast<int>(b.shape()[1]), static_cast<int>(a.shape()[1]),
+                  stream ? static_cast<cudaStream_t>(stream->native_handle()) : nullptr);
+#else
+    throw std::runtime_error("CUDA MatMul is unavailable: build with FORGE_ENABLE_CUDA=ON");
+#endif
+}
+} // namespace
+
+void matmul(const Tensor& a, const Tensor& b, Tensor& output) {
+    dispatch(a, b, output, nullptr);
+}
+void matmul(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream) {
+    dispatch(a, b, output, &stream);
+}
 } // namespace forge

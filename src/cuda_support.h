@@ -37,3 +37,7 @@ private:
     bool changed_ = false;
 };
 } // namespace forge::detail
+
+#define FORGE_DETAIL_STRINGIFY_IMPL(x) #x
+#define FORGE_DETAIL_STRINGIFY(x) FORGE_DETAIL_STRINGIFY_IMPL(x)
+#define FORGE_CUDA_CHECK(call) ::forge::detail::cuda_check((call), #call " at " __FILE__ ":" FORGE_DETAIL_STRINGIFY(__LINE__))

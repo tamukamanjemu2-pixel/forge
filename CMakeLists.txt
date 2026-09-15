@@ -9,8 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FORGE_ENABLE_CUDA "Build NVIDIA CUDA operators, tests, and benchmarks" ON)
 include(CTest)
 
-add_library(forge_core src/tensor.cpp src/memory.cpp)
+add_library(forge_core src/tensor.cpp src/memory.cpp src/stream.cpp)
 target_include_directories(forge_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(forge_ops src/ops/matmul.cpp)
+target_link_libraries(forge_ops PUBLIC forge_core)
 
 if(BUILD_TESTING)
     add_executable(forge_tensor_test tests/tensor_test.cpp)
@@ -20,6 +23,10 @@ if(BUILD_TESTING)
     target_link_libraries(forge_memory_test PRIVATE forge_core)
     target_compile_definitions(forge_memory_test PRIVATE FORGE_TEST_CUDA=$<BOOL:${FORGE_ENABLE_CUDA}>)
     add_test(NAME memory_cpu COMMAND forge_memory_test)
+    add_executable(forge_operator_validation_test tests/operator_validation_test.cpp)
+    target_link_libraries(forge_operator_validation_test PRIVATE forge_ops)
+    target_compile_definitions(forge_operator_validation_test PRIVATE FORGE_TEST_CUDA=$<BOOL:${FORGE_ENABLE_CUDA}>)
+    add_test(NAME operator_validation COMMAND forge_operator_validation_test)
 endif()
 
 if(FORGE_ENABLE_CUDA)
@@ -38,10 +45,9 @@ if(FORGE_ENABLE_CUDA)
     target_include_directories(forge_cuda PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
     target_link_libraries(forge_cuda PUBLIC CUDA::cudart)
 
-    add_library(forge_ops src/ops/matmul.cpp)
-    target_include_directories(forge_ops PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-                                       PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
-    target_link_libraries(forge_ops PUBLIC forge_core PRIVATE forge_cuda)
+    target_compile_definitions(forge_ops PRIVATE FORGE_HAS_CUDA=1)
+    target_include_directories(forge_ops PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
+    target_link_libraries(forge_ops PRIVATE forge_cuda)
 
     add_executable(forge_vector_add benchmarks/vector_add_benchmark.cpp)
     target_link_libraries(forge_vector_add PRIVATE forge_cuda)
