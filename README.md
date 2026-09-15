@@ -1,10 +1,10 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, managed storage, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers and synchronous copies, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
-This builds and tests host metadata only. It does not simulate CUDA or provide CPU operator execution.
+This builds and tests host metadata and CPU storage/copies only. It does not simulate CUDA or provide CPU operator execution.
 
 ```sh
 cmake -S . -B build/host-release -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
@@ -30,9 +30,9 @@ ctest --test-dir build/cuda --output-on-failure
 
 ## Measurement discipline
 
-No new GPU measurements have been collected for milestone 1. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
+No new GPU measurements have been collected for milestones 1–2. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
 
-See `docs/architecture.md` and `docs/milestones/001-host-foundation.md`.
+See `docs/architecture.md` and `docs/milestones/` for implementation and validation checkpoints.
 
 ## Baseline results
 
@@ -75,6 +75,7 @@ forge/
 
 - [x] Non-owning tensor metadata and caller-managed CPU/CUDA storage
 - [x] Host-only build and validated metadata tests
+- [x] Move-only storage ownership and checked views (CPU tested; CUDA validation pending)
 - [x] Vector-add baseline and bandwidth benchmark
 - [x] Naive GEMM baseline, operator, tests, and benchmark
 - [ ] Shared-memory tiled GEMM
@@ -96,3 +97,16 @@ Each optimization should include:
 3. Hardware and software environment details.
 4. Latency and throughput before and after the change.
 5. A short explanation of the measured bottleneck and tradeoff.
+
+## Storage API
+
+```cpp
+#include "forge/memory.h"
+
+forge::Buffer storage(32 * sizeof(float), forge::Device::cpu());
+auto tensor = storage.view({4, 8}, forge::DataType::Float32);
+// storage owns the allocation; tensor borrows it.
+// Keep storage alive until all uses of tensor have completed.
+```
+
+`Buffer` also accepts `Device::cuda(index)` in CUDA builds. `copy_tensor(source, destination)` requires matching shape and dtype and completes synchronously. CPU buffers are 64-byte aligned. Views validate capacity and element alignment. CUDA transfers are intended for setup/readback; asynchronous runtime execution and pooling are not implemented yet.

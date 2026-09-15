@@ -1,5 +1,7 @@
 #include "forge/ops/matmul.h"
 #include "forge/tensor.h"
+#include "forge/memory.h"
+#include "../src/cuda_support.h"
 
 #include <cuda_runtime.h>
 
@@ -7,22 +9,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <vector>
-
-#define CUDA_CHECK(call)                                      \
-    do {                                                      \
-        const cudaError_t error = (call);                     \
-        if (error != cudaSuccess) {                           \
-            std::cerr                                         \
-                << "CUDA error: "                             \
-                << cudaGetErrorString(error)                  \
-                << " at "                                     \
-                << __FILE__                                   \
-                << ":"                                        \
-                << __LINE__                                   \
-                << '\n';                                      \
-            std::exit(EXIT_FAILURE);                          \
-        }                                                     \
-    } while (0)
 
 int main() {
     using forge::DataType;
@@ -66,69 +52,20 @@ int main() {
 
     std::vector<float> h_output(4);
 
-    float* d_a = nullptr;
-    float* d_b = nullptr;
-    float* d_output = nullptr;
-
-    CUDA_CHECK(
-        cudaMalloc(
-            &d_a,
-            h_a.size() * sizeof(float)
-        )
-    );
-
-    CUDA_CHECK(
-        cudaMalloc(
-            &d_b,
-            h_b.size() * sizeof(float)
-        )
-    );
-
-    CUDA_CHECK(
-        cudaMalloc(
-            &d_output,
-            h_output.size() * sizeof(float)
-        )
-    );
-
-    CUDA_CHECK(
-        cudaMemcpy(
-            d_a,
-            h_a.data(),
-            h_a.size() * sizeof(float),
-            cudaMemcpyHostToDevice
-        )
-    );
-
-    CUDA_CHECK(
-        cudaMemcpy(
-            d_b,
-            h_b.data(),
-            h_b.size() * sizeof(float),
-            cudaMemcpyHostToDevice
-        )
-    );
-
-    Tensor a(
-        {2, 3},
-        DataType::Float32,
-        Device::cuda(),
-        d_a
-    );
-
-    Tensor b(
-        {3, 2},
-        DataType::Float32,
-        Device::cuda(),
-        d_b
-    );
-
-    Tensor output(
-        {2, 2},
-        DataType::Float32,
-        Device::cuda(),
-        d_output
-    );
+    forge::Buffer a_storage(h_a.size() * sizeof(float), Device::cuda());
+    forge::Buffer b_storage(h_b.size() * sizeof(float), Device::cuda());
+    forge::Buffer output_storage(h_output.size() * sizeof(float), Device::cuda());
+    auto a = a_storage.view({2, 3}, DataType::Float32);
+    auto b = b_storage.view({3, 2}, DataType::Float32);
+    auto output = output_storage.view({2, 2}, DataType::Float32);
+    // Borrowed host inputs remain alive throughout upload.
+    auto host_a_values = h_a;
+    auto host_b_values = h_b;
+    Tensor host_a({2, 3}, DataType::Float32, Device::cpu(), host_a_values.data());
+    Tensor host_b({3, 2}, DataType::Float32, Device::cpu(), host_b_values.data());
+    Tensor host_output({2, 2}, DataType::Float32, Device::cpu(), h_output.data());
+    forge::copy_tensor(host_a, a);
+    forge::copy_tensor(host_b, b);
 
     forge::matmul(
         a,
@@ -136,17 +73,8 @@ int main() {
         output
     );
 
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    CUDA_CHECK(
-        cudaMemcpy(
-            h_output.data(),
-            d_output,
-            h_output.size() * sizeof(float),
-            cudaMemcpyDeviceToHost
-        )
-    );
+    forge::detail::cuda_check(cudaGetLastError(), "MatMul launch");
+    forge::copy_tensor(output, host_output);
 
     constexpr float tolerance = 1e-5f;
 
@@ -156,7 +84,7 @@ int main() {
         ++i
     ) {
         if (
-            std::abs(
+            !std::isfinite(h_output[i]) || std::abs(
                 h_output[i] - expected[i]
             ) > tolerance
         ) {
@@ -172,10 +100,6 @@ int main() {
             return EXIT_FAILURE;
         }
     }
-
-    CUDA_CHECK(cudaFree(d_a));
-    CUDA_CHECK(cudaFree(d_b));
-    CUDA_CHECK(cudaFree(d_output));
 
     std::cout
         << "MatMul tests passed\n";
