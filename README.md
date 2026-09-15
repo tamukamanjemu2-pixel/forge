@@ -1,6 +1,6 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, a Float32 CUDA MatMul operator, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
@@ -79,7 +79,7 @@ forge/
 - [x] Vector-add baseline and bandwidth benchmark
 - [x] Naive GEMM baseline, operator, tests, and benchmark
 - [ ] Shared-memory tiled GEMM
-- [ ] Activation and softmax kernels
+- [x] ReLU and stable last-axis Softmax (GPU validation pending)
 - [ ] FP16 execution and Tensor Core path
 - [ ] GPU memory pool and tensor-lifetime reuse
 - [ ] Computation graph and execution scheduler
@@ -124,3 +124,18 @@ stream.synchronize();
 ```
 
 The existing `matmul(a, b, output)` overload still enqueues on the tensor device's default stream. Neither overload synchronizes after launch. An explicit Stream uses a non-blocking CUDA stream and must belong to the tensors' device. Keep storage alive until completion, and synchronize before reading results with the blocking copy API. Launch failures throw immediately; execution failures can surface at synchronization. Stream destruction releases the handle but is not a completion/error-checking substitute for `synchronize()`.
+
+## Activation operators
+
+```cpp
+#include "forge/ops/relu.h"
+#include "forge/ops/softmax.h"
+
+forge::relu(input, hidden, stream);
+forge::softmax(hidden, probabilities, stream);
+stream.synchronize();
+```
+
+Both operators require matching contiguous Float32 CUDA tensors with non-overlapping storage. The three-argument form enqueues on the supplied stream; omitting the stream uses the tensor device's default stream. ReLU accepts scalars and arbitrary ranks and propagates NaN. Softmax requires rank >= 1 and normalizes each row along the last dimension. Its supported input contract is finite logits; it subtracts the row maximum before exponentiation. Non-finite logits have no defined probability semantics and are not checked by a host-side scan.
+
+Milestone 4 host validation passed; GPU compilation and correctness are pending. No activation performance results have been measured.

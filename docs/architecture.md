@@ -39,3 +39,11 @@ MatMul validates rank, Float32 dtype, CUDA device agreement, contiguous layout, 
 The naive CUDA kernel retains one output per thread. Index multiplication now uses size_t and launch dimensions use overflow-safe ceiling division. The launcher checks device grid limits before enqueueing and checks the CUDA launch status immediately afterward. Grid attribute queries currently occur per launch; no host overhead or kernel speedup is claimed. Rebenchmark before comparing performance with the historical baseline.
 
 No implicit per-operator synchronization was added. Event-based dependencies, asynchronous copy APIs, pooling, kernel selection, and graph scheduling remain future milestones.
+
+## Activations (milestone 4)
+
+ReLU and Softmax share runtime-side validation and dispatch in src/ops/activations.cpp. Public headers expose separate operators while backend launchers live in cuda/activations.h. Both support the same explicit/default stream policy as MatMul, restore the caller's device, check launch failures, and avoid synchronization inside the operator.
+
+ReLU uses a grid-stride elementwise kernel, allowing arbitrary contiguous shape, including scalars. Negative values become zero; NaNs propagate. Softmax flattens leading dimensions into rows and normalizes the final axis. One 256-thread block reduces each row's maximum and exponential sum with shared memory, including barriers before shared storage reuse. Blocks iterate over additional rows when row count exceeds the grid cap. Column loops support non-power-of-two widths and widths larger than a block. No scratch allocation is performed; the output temporarily holds unnormalized exponentials.
+
+Softmax's numeric contract covers finite Float32 logits. Subtracting the maximum prevents positive exponential overflow. NaN/infinite inputs are outside its specified probability semantics. Input and output overlap, including exact aliasing, is rejected for both operators. Float16, configurable axes, in-place execution, fusion and measured tuning remain future work.
