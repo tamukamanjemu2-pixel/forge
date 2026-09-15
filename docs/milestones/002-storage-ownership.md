@@ -21,7 +21,7 @@ Tensor remains a borrowed view and allocation-free. Buffer is explicitly owned a
 
 ## Local validation
 
-AppleClang 17, Release: configure and build passed. CTest passed 2/2 (tensor_metadata and memory_cpu). No simulated CUDA execution. GPU code has not been compiled or run in this milestone. The sanitizer timeout recorded in milestone 1 is not evidence of sanitizer validation for this milestone.
+AppleClang 17, Release: configure and build passed. CTest passed 2/2 (tensor_metadata and memory_cpu). No simulated CUDA execution. Subsequent user-run NVIDIA validation is recorded below. The sanitizer timeout recorded in milestone 1 is not evidence of sanitizer validation for this milestone.
 
 ```sh
 cmake -S . -B build/host-release -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
@@ -31,7 +31,7 @@ ctest --test-dir build/host-release --output-on-failure --timeout 20
 
 ## NVIDIA validation checkpoint
 
-Run on the T4 before proceeding with GPU-dependent changes. Preserve and share any actual compiler/test failures.
+The user ran the following NVIDIA build/test workflow and supplied successful output on 2026-09-14.
 
 ```sh
 cmake -S . -B build/cuda -DFORGE_ENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=75
@@ -39,7 +39,14 @@ cmake --build build/cuda -j
 ctest --test-dir build/cuda --output-on-failure --timeout 60
 ```
 
-Expected registered tests: tensor_metadata, memory_cpu, matmul_cuda, memory_cuda. Multi-GPU branches run only when at least two devices are present. Actual GPU result: NOT YET RUN. Performance: NOT YET MEASURED. Existing baseline measurements remain unchanged.
+User-supplied validation evidence:
+
+- GNU C++ compiler 13.3.0; NVIDIA CUDA compiler/toolkit 12.8.93.
+- Configure and all build targets succeeded in /content/forge/build/cuda.
+- CTest passed 4/4: tensor_metadata, memory_cpu, matmul_cuda, memory_cuda.
+- GPU-labelled tests passed 2/2. CTest total elapsed time was 0.54 seconds; this is test-suite duration, not inference latency.
+
+GPU model, device count, and commit SHA are not included in the supplied output. Multi-GPU branches run only when at least two devices are present, so their execution is not confirmed by this log. GPU correctness checkpoint passed for this test suite. Performance: NOT YET MEASURED. Existing baseline measurements remain unchanged.
 
 ## Commit message
 

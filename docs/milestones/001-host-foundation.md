@@ -21,7 +21,7 @@ AppleClang 17 on Apple Silicon: Release configure/build succeeded; CTest tensor_
 
 Additional AddressSanitizer/UndefinedBehaviorSanitizer build succeeded, but its test timed out after 15 seconds under this session sandbox (which also reported `/bin/ps: Operation not permitted`). Sanitizer runtime validation is inconclusive; this is not recorded as a pass. `git diff --check` passed.
 
-GPU compilation, correctness, and benchmark execution: NOT YET RUN. No GPU performance claim is made. Run the NVIDIA commands in README.md on the T4 before relying on CUDA build validation.
+At the initial milestone checkpoint, GPU compilation, correctness, and benchmark execution had not been run. Subsequent user-run CUDA compilation and all four tests passed after milestone 2; see 002-storage-ownership.md. Benchmarks remain unmeasured for these changes.
 
 ## Commit message
 

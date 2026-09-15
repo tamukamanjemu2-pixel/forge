@@ -30,7 +30,7 @@ ctest --test-dir build/cuda --output-on-failure
 
 ## Measurement discipline
 
-No new GPU measurements have been collected for milestones 1–2. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
+The user-run CUDA 12.8.93 / GCC 13.3.0 build passed all four tests for milestone 2. No new GPU performance measurements have been collected for milestones 1–2. Performance is **NOT YET MEASURED** for subsequent optimizations. Existing kernels and their benchmarks are preserved. Future reports must distinguish kernel timing from transfers and end-to-end time, and record hardware, toolchain, dimensions, dtype, warmup, and iteration counts.
 
 See `docs/architecture.md` and `docs/milestones/` for implementation and validation checkpoints.
 
@@ -75,7 +75,7 @@ forge/
 
 - [x] Non-owning tensor metadata and caller-managed CPU/CUDA storage
 - [x] Host-only build and validated metadata tests
-- [x] Move-only storage ownership and checked views (CPU tested; CUDA validation pending)
+- [x] Move-only storage ownership and checked views (CPU and CUDA tests passed)
 - [x] Vector-add baseline and bandwidth benchmark
 - [x] Naive GEMM baseline, operator, tests, and benchmark
 - [ ] Shared-memory tiled GEMM
