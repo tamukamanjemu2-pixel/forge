@@ -21,6 +21,7 @@ struct Executable::Impl {
     std::vector<Tensor> tensors;
     MemoryStatistics statistics;
     bool completed = false;
+    MatMulKernel kernel = MatMulKernel::Naive;
 };
 Executable::Executable(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Executable::~Executable() = default;
@@ -44,6 +45,8 @@ const MemoryStatistics& Executable::memory_statistics() const {
 }
 Executable Runtime::compile(const Graph& graph) const { return compile(graph, {}); }
 Executable Runtime::compile(const Graph& graph, CompileOptions options) const {
+    if (options.matmul_kernel != MatMulKernel::Naive && options.matmul_kernel != MatMulKernel::Tiled)
+        throw std::invalid_argument("Unknown graph MatMul kernel");
     auto memory = plan_memory(graph, options.reuse_memory);
     for (const auto& node : graph.nodes_) {
         if (node.operation == Graph::Operation::Input) {
@@ -59,6 +62,7 @@ Executable Runtime::compile(const Graph& graph, CompileOptions options) const {
     }
     auto impl = std::make_unique<Executable::Impl>(graph.nodes_.front().metadata.device());
     impl->owner = graph.owner_;
+    impl->kernel = options.matmul_kernel;
     impl->nodes = graph.nodes_;
     impl->order = std::move(memory.order);
     impl->outputs = graph.outputs_;
@@ -86,7 +90,7 @@ void Runtime::execute(Executable& executable) const {
             switch (node.operation) {
                 case Graph::Operation::Input: break;
                 case Graph::Operation::MatMul:
-                    matmul(plan.tensors[node.inputs[0]], plan.tensors[node.inputs[1]], plan.tensors[i], plan.stream);
+                    matmul(plan.tensors[node.inputs[0]], plan.tensors[node.inputs[1]], plan.tensors[i], plan.stream, plan.kernel);
                     break;
                 case Graph::Operation::ReLU:
                     relu(plan.tensors[node.inputs[0]], plan.tensors[i], plan.stream); break;

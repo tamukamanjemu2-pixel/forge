@@ -78,7 +78,7 @@ forge/
 - [x] Move-only storage ownership and checked views (CPU and CUDA tests passed)
 - [x] Vector-add baseline and bandwidth benchmark
 - [x] Naive GEMM baseline, operator, tests, and benchmark
-- [ ] Shared-memory tiled GEMM
+- [x] Selectable shared-memory tiled GEMM (GPU correctness/performance pending)
 - [x] ReLU and stable last-axis Softmax (GPU validation pending)
 - [ ] FP16 execution and Tensor Core path
 - [x] Per-executable storage slots and tensor-lifetime reuse (GPU validation pending)
@@ -160,7 +160,7 @@ runtime.execute(executable);
 
 Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Dead-node pruning, graph fusion, asynchronous graph submission, and cross-executable pooling are not implemented yet.
 
-After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–6 remains deferred. The current full suite registers ten tests.
+After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–7 remains deferred. The current full suite registers ten tests.
 
 If the Mac linker rejects `arm64e.x1` in the selected macOS 27 SDK, the locally verified workaround is a separate build using the installed 26.5 SDK:
 
@@ -183,3 +183,24 @@ auto baseline = runtime.compile(graph, {.reuse_memory = false});
 ```
 
 `allocated_bytes()` now reports reserved slot capacities including padding. Statistics describe the plan and requested allocations, not total GPU/driver memory or measured performance. Small tensors may reserve more bytes than their payload due to padding. Slots are owned by one executable; there is no global pool or per-operation allocation/free.
+
+## GEMM implementations and comparison
+
+Naive GEMM remains the default. Opt into the 16×16 shared-memory tiled candidate explicitly:
+
+```cpp
+forge::matmul(a, b, output, stream, forge::MatMulKernel::Tiled);
+auto executable = runtime.compile(graph, {.matmul_kernel = forge::MatMulKernel::Tiled});
+```
+
+The tiled path is Float32 only and uses neither FP16 nor Tensor Cores. It is implemented but has not yet been compiled/tested on NVIDIA hardware or benchmarked. Kernel selection does not change the public tensor contract or stream policy.
+
+After the GPU test suite passes, compare on the same GPU/build:
+
+```sh
+./build/cuda/forge_matmul_compare
+# Optional: M N K warmup_iterations measured_iterations
+./build/cuda/forge_matmul_compare 512 512 512 20 100
+```
+
+The benchmark prints GPU/toolchain metadata and CSV timing rows. Full CPU-reference checks, allocations and transfers are outside timing. CUDA-event intervals bracket operator submission and may include GPU idle time due to host dispatch; host timings additionally include event calls and waiting. Neither is an end-to-end model measurement. The printed ratio is computed from the current run's event medians, not historical baseline numbers. Defaults are ten warmups and fifty samples per implementation for each shape. Large custom dimensions also incur a full CPU GEMM reference calculation.

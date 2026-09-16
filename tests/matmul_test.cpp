@@ -12,7 +12,7 @@
 namespace {
 using namespace forge;
 
-void run_case(int m, int n, int k, bool explicit_stream) {
+void run_case(int m, int n, int k, bool explicit_stream, MatMulKernel kernel) {
     std::vector<float> av(m * k), bv(k * n), actual(m * n);
     for (std::size_t i = 0; i < av.size(); ++i) av[i] = (static_cast<int>(i % 17) - 8) / 7.0f;
     for (std::size_t i = 0; i < bv.size(); ++i) bv[i] = (static_cast<int>(i % 13) - 6) / 5.0f;
@@ -47,12 +47,14 @@ void run_case(int m, int n, int k, bool explicit_stream) {
         // Prepare the identity before the chain: synchronous upload would otherwise
         // mask ordering errors by completing the first operator.
         copy_tensor(host_eye, eye);
-        matmul(a, b, c, stream);
-        matmul(c, eye, result, stream);
+        if (kernel == MatMulKernel::Naive) matmul(a, b, c, stream);
+        else matmul(a, b, c, stream, kernel);
+        matmul(c, eye, result, stream, kernel);
         stream.synchronize();
         copy_tensor(result, host_c);
     } else {
-        matmul(a, b, c);
+        if (kernel == MatMulKernel::Naive) matmul(a, b, c);
+        else matmul(a, b, c, kernel);
         copy_tensor(c, host_c);
     }
     for (int row = 0; row < m; ++row) {
@@ -109,12 +111,16 @@ void check_device_restoration() {
 
 int main() {
     FORGE_CUDA_CHECK(cudaSetDevice(0));
+    for (auto kernel : {forge::MatMulKernel::Naive, forge::MatMulKernel::Tiled}) {
     for (bool explicit_stream : {false, true}) {
-        run_case(1, 1, 1, explicit_stream);
-        run_case(2, 2, 3, explicit_stream);
-        run_case(17, 19, 23, explicit_stream);
-        run_case(32, 48, 16, explicit_stream);
-        run_case(3, 7, 257, explicit_stream);
+        run_case(1, 1, 1, explicit_stream, kernel);
+        run_case(2, 2, 3, explicit_stream, kernel);
+        run_case(15, 16, 17, explicit_stream, kernel);
+        run_case(16, 17, 15, explicit_stream, kernel);
+        run_case(17, 19, 23, explicit_stream, kernel);
+        run_case(32, 48, 16, explicit_stream, kernel);
+        run_case(3, 7, 257, explicit_stream, kernel);
+    }
     }
     check_device_restoration();
     std::cout << "MatMul default/explicit stream tests passed\n";

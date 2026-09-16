@@ -67,3 +67,9 @@ A deterministic best-fit search chooses the smallest free slot large enough for 
 Compilation allocates all slots once. Runtime Tensor views reference those allocations with their original shapes. Reuse is safe because all kernels execute in order on one stream; no new synchronization is necessary between last use and reuse. A future multi-stream scheduler must add dependency events or recompute lifetimes before reusing this plan.
 
 The no-reuse compile option creates dedicated padded slots and preserves the execution API. Statistics separate total unpadded tensor bytes, reserved capacities, peak live payload, allocation count and reuse assignments. They exclude borrowed storage, driver overhead and stream objects. Peak live payload is a schedule calculation, not a sampled GPU memory measurement.
+
+## Selectable tiled GEMM (milestone 7)
+
+MatMulKernel selects Naive or Tiled through additional operator overloads and CompileOptions::matmul_kernel. Existing overloads retain Naive. Runtime stores the selection at compilation and applies it to each graph MatMul. Unknown enum values are rejected before hardware access. This is explicit two-kernel dispatch, not yet a general plugin registry or automatic tuning system.
+
+The tiled Float32 kernel uses a 16×16 block and two shared-memory tiles. Threads cooperatively load coalesced rows, zero-pad partial tiles, synchronize, accumulate one output per thread, then synchronize before loading the next tile. No thread returns before the shared barriers. Launches use the supplied stream and retain dimension/error checks. The algorithm is a candidate pending NVIDIA correctness and measurement, not an accepted performance improvement.

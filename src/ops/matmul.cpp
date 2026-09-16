@@ -120,13 +120,17 @@ void validate_matmul(
         throw std::invalid_argument("MatMul output must not overlap either input");
 }
 
-void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* stream) {
+void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* stream, MatMulKernel kernel) {
+    if (kernel != MatMulKernel::Naive && kernel != MatMulKernel::Tiled)
+        throw std::invalid_argument("Unknown MatMul kernel");
     validate_matmul(a, b, output);
     if (stream && stream->device() != a.device())
         throw std::invalid_argument("MatMul stream and tensors must be on the same device");
 #ifdef FORGE_HAS_CUDA
     detail::DeviceScope scope(a.device().index);
-    launch_matmul(static_cast<const float*>(a.data()), static_cast<const float*>(b.data()),
+    const auto launch = kernel == MatMulKernel::Tiled ? launch_matmul_tiled :
+        static_cast<void (*)(const float*, const float*, float*, int, int, int, cudaStream_t)>(launch_matmul);
+    launch(static_cast<const float*>(a.data()), static_cast<const float*>(b.data()),
                   static_cast<float*>(output.data()), static_cast<int>(a.shape()[0]),
                   static_cast<int>(b.shape()[1]), static_cast<int>(a.shape()[1]),
                   stream ? static_cast<cudaStream_t>(stream->native_handle()) : nullptr);
@@ -137,9 +141,15 @@ void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* st
 } // namespace
 
 void matmul(const Tensor& a, const Tensor& b, Tensor& output) {
-    dispatch(a, b, output, nullptr);
+    dispatch(a, b, output, nullptr, MatMulKernel::Naive);
 }
 void matmul(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream) {
-    dispatch(a, b, output, &stream);
+    dispatch(a, b, output, &stream, MatMulKernel::Naive);
+}
+void matmul(const Tensor& a, const Tensor& b, Tensor& output, MatMulKernel kernel) {
+    dispatch(a, b, output, nullptr, kernel);
+}
+void matmul(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream, MatMulKernel kernel) {
+    dispatch(a, b, output, &stream, kernel);
 }
 } // namespace forge

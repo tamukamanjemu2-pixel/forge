@@ -12,7 +12,7 @@ template<class E, class F> void expect(F action) {
     try { action(); } catch (const E&) { return; }
     throw std::runtime_error("Expected runtime rejection");
 }
-void run(int batch, bool reuse) {
+void run(int batch, bool reuse, forge::MatMulKernel kernel) {
     using namespace forge;
     constexpr int inputs = 3, hidden = 5, classes = 2;
     std::vector<float> x(batch * inputs), w1(inputs * hidden), w2(hidden * classes), result(batch * classes);
@@ -37,7 +37,7 @@ void run(int batch, bool reuse) {
         auto activation = graph.relu(intermediate);
         output = graph.softmax(graph.matmul(activation, c));
         graph.output(output);
-        return runtime.compile(graph, {.reuse_memory = reuse});
+        return runtime.compile(graph, {.reuse_memory = reuse, .matmul_kernel = kernel});
     }(); // Graph builder is destroyed; compiled snapshot remains valid.
     expect<std::logic_error>([&] { executable.output(output); });
     expect<std::invalid_argument>([&] { executable.output(intermediate); });
@@ -116,7 +116,8 @@ void retained_output() {
 
 }
 int main() {
-    for (bool reuse : {false, true}) { run(1, reuse); run(7, reuse); run(32, reuse); }
+    for (auto kernel : {forge::MatMulKernel::Naive, forge::MatMulKernel::Tiled})
+        for (bool reuse : {false, true}) { run(1, reuse, kernel); run(7, reuse, kernel); run(32, reuse, kernel); }
     retained_output();
     std::cout << "Graph runtime inference tests passed\n";
 }

@@ -13,3 +13,6 @@ void launch_matmul(
 // Internal explicit-stream entry point; the original six-argument API remains.
 void launch_matmul(const float* a, const float* b, float* c,
                    int m, int n, int k, cudaStream_t stream);
+
+void launch_matmul_tiled(const float* a, const float* b, float* c,
+                         int m, int n, int k, cudaStream_t stream);

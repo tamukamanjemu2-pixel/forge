@@ -55,7 +55,7 @@ if(FORGE_ENABLE_CUDA)
     target_compile_definitions(forge_core PRIVATE FORGE_HAS_CUDA=1)
     target_link_libraries(forge_core PRIVATE CUDA::cudart)
 
-    add_library(forge_cuda cuda/vector_add.cu cuda/matmul.cu cuda/relu.cu cuda/softmax.cu)
+    add_library(forge_cuda cuda/vector_add.cu cuda/matmul.cu cuda/matmul_tiled.cu cuda/relu.cu cuda/softmax.cu)
     target_include_directories(forge_cuda PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
     target_link_libraries(forge_cuda PUBLIC CUDA::cudart)
 
@@ -67,6 +67,9 @@ if(FORGE_ENABLE_CUDA)
     target_link_libraries(forge_vector_add PRIVATE forge_cuda)
     add_executable(forge_matmul_benchmark benchmarks/matmul_benchmark.cpp)
     target_link_libraries(forge_matmul_benchmark PRIVATE forge_ops forge_cuda)
+
+    add_executable(forge_matmul_compare benchmarks/matmul_compare.cpp)
+    target_link_libraries(forge_matmul_compare PRIVATE forge_ops forge_cuda)
 
     add_executable(forge_inference examples/inference.cpp)
     target_link_libraries(forge_inference PRIVATE forge_runtime)

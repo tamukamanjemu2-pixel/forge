@@ -29,6 +29,7 @@ int main() {
         for (auto dep : graph.nodes()[i].inputs) check(visited[dep]);
         visited[i] = true;
     }
+    expect<std::invalid_argument>([&] { runtime.compile(graph, {.matmul_kernel = static_cast<MatMulKernel>(99)}); });
     expect<std::invalid_argument>([&] { runtime.compile(graph); });
     expect<std::invalid_argument>([&] { graph.matmul(x, x); });
     expect<std::invalid_argument>([&] { graph.relu({}); });

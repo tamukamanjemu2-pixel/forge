@@ -1,6 +1,7 @@
 #pragma once
 #include "forge/graph.h"
 #include "forge/memory_plan.h"
+#include "forge/ops/matmul.h"
 #include <memory>
 
 namespace forge {
@@ -25,6 +26,7 @@ private:
 
 struct CompileOptions {
     bool reuse_memory = true;
+    MatMulKernel matmul_kernel = MatMulKernel::Naive;
 };
 
 class Runtime {

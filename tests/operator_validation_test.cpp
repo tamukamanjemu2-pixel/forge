@@ -19,6 +19,7 @@ int main() {
     Tensor a({2, 3}, DataType::Float32, Device::cuda(), av);
     Tensor b({3, 2}, DataType::Float32, Device::cuda(), bv);
     Tensor c({2, 2}, DataType::Float32, Device::cuda(), cv);
+    expect<std::invalid_argument>([&] { matmul(a, b, c, static_cast<MatMulKernel>(99)); }, "unknown kernel");
     Tensor rank({6}, DataType::Float32, Device::cuda(), av);
     expect<std::invalid_argument>([&] { matmul(rank, b, c); }, "rank");
     Tensor dtype({2, 3}, DataType::Float16, Device::cuda(), av);
@@ -47,6 +48,7 @@ int main() {
 #if !FORGE_TEST_CUDA
     expect<std::runtime_error>([] { Stream stream; }, "host-only stream");
     expect<std::runtime_error>([&] { matmul(a, b, c); }, "host-only dispatch");
+    expect<std::runtime_error>([&] { matmul(a, b, c, MatMulKernel::Tiled); }, "host-only tiled dispatch");
 #endif
     std::cout << "Operator validation tests passed\n";
 }
