@@ -1,6 +1,6 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph execution, memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
@@ -82,7 +82,7 @@ forge/
 - [x] ReLU and stable last-axis Softmax (GPU validation pending)
 - [ ] FP16 execution and Tensor Core path
 - [ ] GPU memory pool and tensor-lifetime reuse
-- [ ] Computation graph and execution scheduler
+- [x] Computation graph and single-stream execution scheduler (GPU validation pending)
 - [ ] CUDA streams, batching, and asynchronous execution
 - [ ] Operator fusion
 - [ ] NVIDIA Nsight profiling and bottleneck reports
@@ -139,3 +139,33 @@ stream.synchronize();
 Both operators require matching contiguous Float32 CUDA tensors with non-overlapping storage. The three-argument form enqueues on the supplied stream; omitting the stream uses the tensor device's default stream. ReLU accepts scalars and arbitrary ranks and propagates NaN. Softmax requires rank >= 1 and normalizes each row along the last dimension. Its supported input contract is finite logits; it subtracts the row maximum before exponentiation. Non-finite logits have no defined probability semantics and are not checked by a host-side scan.
 
 Milestone 4 host validation passed; GPU compilation and correctness are pending. No activation performance results have been measured.
+
+## Graph inference
+
+The `forge_inference` example uploads inputs/weights and executes the two-layer model through the graph/runtime:
+
+```cpp
+forge::Graph graph;
+auto input = graph.input(x);
+auto weights1 = graph.input(w1);
+auto weights2 = graph.input(w2);
+auto hidden = graph.relu(graph.matmul(input, weights1));
+auto output = graph.softmax(graph.matmul(hidden, weights2));
+graph.output(output);
+forge::Runtime runtime;
+auto executable = runtime.compile(graph);
+runtime.execute(executable);
+// Copy executable.output(output) to a matching CPU tensor to read results.
+```
+
+Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Pooling, dead-node pruning, graph fusion, and asynchronous graph submission are not implemented yet.
+
+After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–5 remains deferred. The current full suite registers nine tests.
+
+If the Mac linker rejects `arm64e.x1` in the selected macOS 27 SDK, the locally verified workaround is a separate build using the installed 26.5 SDK:
+
+```sh
+cmake -S . -B build/host-sdk26 -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+cmake --build build/host-sdk26 -j
+ctest --test-dir build/host-sdk26 --output-on-failure --timeout 20
+```
