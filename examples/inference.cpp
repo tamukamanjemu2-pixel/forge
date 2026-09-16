@@ -32,5 +32,6 @@ int main() {
     copy_tensor(executable.output(output), host_output);
     for (int row = 0; row < 2; ++row)
         std::cout << "Row " << row << ": " << probabilities[row * 2] << ' ' << probabilities[row * 2 + 1] << '\n';
-    std::cout << "Owned intermediate/output bytes: " << executable.allocated_bytes() << '\n';
+    std::cout << "Reused tensor assignments: " << executable.memory_statistics().reuse_count << '\n';
+    std::cout << "Reserved tensor storage bytes: " << executable.allocated_bytes() << '\n';
 }

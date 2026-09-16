@@ -19,7 +19,7 @@ struct Executable::Impl {
     std::vector<std::size_t> order, outputs;
     std::vector<Buffer> storage;
     std::vector<Tensor> tensors;
-    std::size_t bytes = 0;
+    MemoryStatistics statistics;
     bool completed = false;
 };
 Executable::Executable(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -36,18 +36,18 @@ const Tensor& Executable::output(Graph::Value value) const {
 }
 std::size_t Executable::allocated_bytes() const {
     if (!impl_) throw std::logic_error("Executable was moved from");
-    return impl_->bytes;
+    return impl_->statistics.reserved_bytes;
 }
-Executable Runtime::compile(const Graph& graph) const {
-    auto order = graph.execution_order();
-    std::size_t bytes = 0;
+const MemoryStatistics& Executable::memory_statistics() const {
+    if (!impl_) throw std::logic_error("Executable was moved from");
+    return impl_->statistics;
+}
+Executable Runtime::compile(const Graph& graph) const { return compile(graph, {}); }
+Executable Runtime::compile(const Graph& graph, CompileOptions options) const {
+    auto memory = plan_memory(graph, options.reuse_memory);
     for (const auto& node : graph.nodes_) {
         if (node.operation == Graph::Operation::Input) {
             if (!node.metadata.data()) throw std::invalid_argument("Graph input has no bound storage");
-        } else {
-            if (node.metadata.nbytes() > std::numeric_limits<std::size_t>::max() - bytes)
-                throw std::overflow_error("Graph allocation size overflow");
-            bytes += node.metadata.nbytes();
         }
         if (node.operation == Graph::Operation::MatMul) {
             const auto& a = graph.nodes_[node.inputs[0]].metadata;
@@ -60,16 +60,18 @@ Executable Runtime::compile(const Graph& graph) const {
     auto impl = std::make_unique<Executable::Impl>(graph.nodes_.front().metadata.device());
     impl->owner = graph.owner_;
     impl->nodes = graph.nodes_;
-    impl->order = std::move(order);
+    impl->order = std::move(memory.order);
     impl->outputs = graph.outputs_;
-    impl->bytes = bytes;
+    impl->statistics = memory.statistics;
     impl->tensors.reserve(graph.nodes_.size());
-    impl->storage.reserve(graph.nodes_.size());
-    for (const auto& node : graph.nodes_) {
+    impl->storage.reserve(memory.capacities.size());
+    for (auto capacity : memory.capacities)
+        impl->storage.emplace_back(capacity, graph.nodes_.front().metadata.device());
+    for (std::size_t i = 0; i < graph.nodes_.size(); ++i) {
+        const auto& node = graph.nodes_[i];
         if (node.operation == Graph::Operation::Input) impl->tensors.push_back(node.metadata);
         else {
-            impl->storage.emplace_back(node.metadata.nbytes(), node.metadata.device());
-            impl->tensors.push_back(impl->storage.back().view(node.metadata.shape(), node.metadata.dtype()));
+            impl->tensors.push_back(impl->storage[memory.slots[i]].view(node.metadata.shape(), node.metadata.dtype()));
         }
     }
     return Executable(std::move(impl));

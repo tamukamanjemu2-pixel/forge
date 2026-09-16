@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FORGE_ENABLE_CUDA "Build NVIDIA CUDA operators, tests, and benchmarks" ON)
 include(CTest)
 
-add_library(forge_core src/tensor.cpp src/memory.cpp src/stream.cpp src/graph.cpp)
+add_library(forge_core src/tensor.cpp src/memory.cpp src/stream.cpp src/graph.cpp src/memory_plan.cpp)
 target_include_directories(forge_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(forge_ops src/ops/matmul.cpp src/ops/activations.cpp)
@@ -38,6 +38,9 @@ if(BUILD_TESTING)
     target_link_libraries(forge_graph_test PRIVATE forge_runtime)
     target_compile_definitions(forge_graph_test PRIVATE FORGE_TEST_CUDA=$<BOOL:${FORGE_ENABLE_CUDA}>)
     add_test(NAME graph_validation COMMAND forge_graph_test)
+    add_executable(forge_memory_plan_test tests/memory_plan_test.cpp)
+    target_link_libraries(forge_memory_plan_test PRIVATE forge_core)
+    add_test(NAME memory_planning COMMAND forge_memory_plan_test)
 endif()
 
 if(FORGE_ENABLE_CUDA)

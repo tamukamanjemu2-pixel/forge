@@ -1,6 +1,6 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; cross-executable memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
@@ -81,7 +81,7 @@ forge/
 - [ ] Shared-memory tiled GEMM
 - [x] ReLU and stable last-axis Softmax (GPU validation pending)
 - [ ] FP16 execution and Tensor Core path
-- [ ] GPU memory pool and tensor-lifetime reuse
+- [x] Per-executable storage slots and tensor-lifetime reuse (GPU validation pending)
 - [x] Computation graph and single-stream execution scheduler (GPU validation pending)
 - [ ] CUDA streams, batching, and asynchronous execution
 - [ ] Operator fusion
@@ -109,7 +109,7 @@ auto tensor = storage.view({4, 8}, forge::DataType::Float32);
 // Keep storage alive until all uses of tensor have completed.
 ```
 
-`Buffer` also accepts `Device::cuda(index)` in CUDA builds. `copy_tensor(source, destination)` requires matching shape and dtype and completes synchronously. CPU buffers are 64-byte aligned. Views validate capacity and element alignment. CUDA transfers are intended for setup/readback; stream-aware MatMul is available separately; graph scheduling, asynchronous transfer APIs, and pooling are not implemented yet.
+`Buffer` also accepts `Device::cuda(index)` in CUDA builds. `copy_tensor(source, destination)` requires matching shape and dtype and completes synchronously. CPU buffers are 64-byte aligned. Views validate capacity and element alignment. CUDA transfers are intended for setup/readback; stream-aware MatMul is available separately; graph scheduling, asynchronous transfer APIs and cross-executable pooling are not implemented yet.
 
 ## Explicit CUDA stream execution
 
@@ -158,9 +158,9 @@ runtime.execute(executable);
 // Copy executable.output(output) to a matching CPU tensor to read results.
 ```
 
-Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Pooling, dead-node pruning, graph fusion, and asynchronous graph submission are not implemented yet.
+Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Dead-node pruning, graph fusion, asynchronous graph submission, and cross-executable pooling are not implemented yet.
 
-After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–5 remains deferred. The current full suite registers nine tests.
+After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–6 remains deferred. The current full suite registers ten tests.
 
 If the Mac linker rejects `arm64e.x1` in the selected macOS 27 SDK, the locally verified workaround is a separate build using the installed 26.5 SDK:
 
@@ -169,3 +169,17 @@ cmake -S . -B build/host-sdk26 -DFORGE_ENABLE_CUDA=OFF -DCMAKE_BUILD_TYPE=Releas
 cmake --build build/host-sdk26 -j
 ctest --test-dir build/host-sdk26 --output-on-failure --timeout 20
 ```
+
+## Memory planning
+
+Graph compilation now assigns computed tensors to reusable storage slots. Inputs remain borrowed, outputs stay live through completion, and a slot is reused only after its prior value's final consumer. Slot capacities are rounded to 256 bytes. This plan relies on the runtime's single-stream ordering.
+
+```cpp
+auto executable = runtime.compile(graph); // lifetime reuse enabled
+const auto& stats = executable.memory_statistics();
+// stats.tensor_bytes, reserved_bytes, peak_live_bytes, allocation_count, reuse_count
+// Disable reuse for an independent execution/memory baseline:
+auto baseline = runtime.compile(graph, {.reuse_memory = false});
+```
+
+`allocated_bytes()` now reports reserved slot capacities including padding. Statistics describe the plan and requested allocations, not total GPU/driver memory or measured performance. Small tensors may reserve more bytes than their payload due to padding. Slots are owned by one executable; there is no global pool or per-operation allocation/free.

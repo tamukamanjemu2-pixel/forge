@@ -12,7 +12,7 @@ template<class E, class F> void expect(F action) {
     try { action(); } catch (const E&) { return; }
     throw std::runtime_error("Expected runtime rejection");
 }
-void run(int batch) {
+void run(int batch, bool reuse) {
     using namespace forge;
     constexpr int inputs = 3, hidden = 5, classes = 2;
     std::vector<float> x(batch * inputs), w1(inputs * hidden), w2(hidden * classes), result(batch * classes);
@@ -37,11 +37,14 @@ void run(int batch) {
         auto activation = graph.relu(intermediate);
         output = graph.softmax(graph.matmul(activation, c));
         graph.output(output);
-        return runtime.compile(graph);
+        return runtime.compile(graph, {.reuse_memory = reuse});
     }(); // Graph builder is destroyed; compiled snapshot remains valid.
     expect<std::logic_error>([&] { executable.output(output); });
     expect<std::invalid_argument>([&] { executable.output(intermediate); });
-    check(executable.allocated_bytes() == static_cast<std::size_t>(batch * (2 * hidden + 2 * classes) * 4), "Allocation accounting");
+    check(executable.memory_statistics().tensor_bytes == static_cast<std::size_t>(batch * (2 * hidden + 2 * classes) * 4), "Payload accounting");
+    check(executable.allocated_bytes() == executable.memory_statistics().reserved_bytes, "Reserved accounting");
+    check(executable.memory_statistics().allocation_count == (reuse ? 2u : 4u), "Allocation count");
+    check(executable.memory_statistics().reuse_count == (reuse ? 2u : 0u), "Reuse count");
     const void* first_pointer = nullptr;
     for (int iteration = 0; iteration < 2; ++iteration) {
         for (auto& value : x) value += iteration * 0.75f;
@@ -81,8 +84,39 @@ void run(int batch) {
     check(identity.output(input).data() == tx.data(), "Input-only graph changed pointer");
     expect<std::invalid_argument>([&] { identity.output(output); });
 }
+void retained_output() {
+    using namespace forge;
+    std::vector<float> values{-1, 2, -3, 4}, result(4);
+    Buffer storage(16, Device::cuda());
+    auto input = storage.view({4}, DataType::Float32);
+    Tensor host({4}, DataType::Float32, Device::cpu(), values.data());
+    Tensor readback({4}, DataType::Float32, Device::cpu(), result.data());
+    copy_tensor(host, input);
+    Graph graph;
+    auto x = graph.input(input);
+    auto early = graph.relu(x);
+    auto probabilities = graph.softmax(early);
+    auto later = graph.softmax(graph.relu(probabilities));
+    graph.output(early); graph.output(later);
+    Runtime runtime;
+    auto executable = runtime.compile(graph);
+    for (int iteration = 0; iteration < 2; ++iteration) {
+        runtime.execute(executable);
+        copy_tensor(executable.output(early), readback);
+        check(result == std::vector<float>({0, 2, 0, 4}), "Early output overwritten by reuse");
+        copy_tensor(executable.output(later), readback);
+        double sum = 0;
+        for (float probability : result) {
+            check(std::isfinite(probability) && probability >= 0 && probability <= 1, "Invalid retained probability");
+            sum += probability;
+        }
+        check(std::abs(sum - 1) < 2e-5, "Retained probability sum");
+    }
+}
+
 }
 int main() {
-    run(1); run(7); run(32);
+    for (bool reuse : {false, true}) { run(1, reuse); run(7, reuse); run(32, reuse); }
+    retained_output();
     std::cout << "Graph runtime inference tests passed\n";
 }
