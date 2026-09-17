@@ -1,6 +1,10 @@
 #include "forge/memory.h"
 #include "forge/ops/matmul.h"
 #include "forge/stream.h"
+#include "forge/ops/relu.h"
+#ifndef FORGE_COMPARE_FUSION
+#define FORGE_COMPARE_FUSION 0
+#endif
 #include "../src/cuda_support.h"
 #include <algorithm>
 #include <charconv>
@@ -47,6 +51,9 @@ void run(Shape shape, int warmup, int iterations) {
             for (int col = 0; col < n; ++col)
                 expected[static_cast<std::size_t>(row) * n + col] +=
                     static_cast<double>(av[static_cast<std::size_t>(row) * k + inner]) * bv[static_cast<std::size_t>(inner) * n + col];
+    if (FORGE_COMPARE_FUSION) for (auto& value : expected) value = std::max(value, 0.0);
+    Buffer scratch(actual.size() * 4, Device::cuda());
+    auto intermediate = scratch.view({m, n}, DataType::Float32);
     Buffer as(av.size() * 4, Device::cuda()), bs(bv.size() * 4, Device::cuda()), cs(actual.size() * 4, Device::cuda());
     auto a = as.view({m, k}, DataType::Float32), b = bs.view({k, n}, DataType::Float32), c = cs.view({m, n}, DataType::Float32);
     Tensor ha({m, k}, DataType::Float32, Device::cpu(), av.data());
@@ -58,7 +65,16 @@ void run(Shape shape, int warmup, int iterations) {
     Event start, end;
     double naive_median = 0;
     for (auto kernel : {MatMulKernel::Naive, MatMulKernel::Tiled}) {
-        matmul(a, b, c, stream, kernel);
+      double separate_median = 0;
+      for (int variant = 0; variant < (FORGE_COMPARE_FUSION ? 2 : 1); ++variant) {
+        const auto submit = [&] {
+            if (FORGE_COMPARE_FUSION && variant == 1) matmul_relu(a, b, c, stream, kernel);
+            else if (FORGE_COMPARE_FUSION) {
+                matmul(a, b, intermediate, stream, kernel);
+                relu(intermediate, c, stream);
+            } else matmul(a, b, c, stream, kernel);
+        };
+        submit();
         stream.synchronize();
         copy_tensor(c, hc);
         double max_error = 0;
@@ -68,14 +84,14 @@ void run(Shape shape, int warmup, int iterations) {
                 throw std::runtime_error("Benchmark correctness check failed before timing");
             max_error = std::max(max_error, error);
         }
-        for (int i = 0; i < warmup; ++i) matmul(a, b, c, stream, kernel);
+        for (int i = 0; i < warmup; ++i) submit();
         stream.synchronize();
         std::vector<double> gpu_ms, host_ms;
         gpu_ms.reserve(iterations); host_ms.reserve(iterations);
         for (int i = 0; i < iterations; ++i) {
             const auto before = std::chrono::steady_clock::now();
             FORGE_CUDA_CHECK(cudaEventRecord(start.handle, native));
-            matmul(a, b, c, stream, kernel);
+            submit();
             FORGE_CUDA_CHECK(cudaEventRecord(end.handle, native));
             FORGE_CUDA_CHECK(cudaEventSynchronize(end.handle));
             const auto after = std::chrono::steady_clock::now();
@@ -87,10 +103,14 @@ void run(Shape shape, int warmup, int iterations) {
         }
         const double median = percentile(gpu_ms, 0.5);
         if (kernel == MatMulKernel::Naive) naive_median = median;
-        std::cout << (kernel == MatMulKernel::Naive ? "naive" : "tiled") << ',' << m << ',' << n << ',' << k << ','
+        if (variant == 0) separate_median = median;
+        std::cout << (kernel == MatMulKernel::Naive ? "naive" : "tiled") << ',' << (FORGE_COMPARE_FUSION ? (variant ? "fused" : "separate") : "gemm") << ','
+                  << (FORGE_COMPARE_FUSION && variant == 0 ? 2 : 1) << ','
+                  << (FORGE_COMPARE_FUSION && variant == 0 ? 2 * actual.size() * sizeof(float) : 0) << ',' << m << ',' << n << ',' << k << ','
                   << warmup << ',' << iterations << ',' << percentile(gpu_ms, 0) << ',' << median << ','
                   << percentile(gpu_ms, 0.95) << ',' << percentile(host_ms, 0.5) << ','
-                  << (2.0 * m * n * k / (median * 1e6)) << ',' << max_error << ',' << naive_median / median << '\n';
+                  << (2.0 * m * n * k / (median * 1e6)) << ',' << max_error << ',' << (FORGE_COMPARE_FUSION ? separate_median : naive_median) / median << '\n';
+      }
     }
 }
 }
@@ -100,7 +120,7 @@ int main(int argc, char** argv) {
         int warmup = 10, iterations = 50;
         if (argc != 1) {
             if (argc != 4 && argc != 6)
-                throw std::invalid_argument("Usage: forge_matmul_compare [M N K [warmup iterations]]; dimensions 1..4096");
+                throw std::invalid_argument("Usage: comparison_binary [M N K [warmup iterations]]; dimensions 1..4096");
             shapes = {{number(argv[1], 1, 4096), number(argv[2], 1, 4096), number(argv[3], 1, 4096)}};
             if (argc == 6) { warmup = number(argv[4], 0, 10000); iterations = number(argv[5], 1, 10000); }
         }
@@ -118,11 +138,13 @@ int main(int argc, char** argv) {
 #else
         std::cout << "# build=assertions-enabled, dtype=Float32\n";
 #endif
+        std::cout << "# Mode=" << (FORGE_COMPARE_FUSION ? "MatMul+ReLU; baseline=separate per kernel" : "GEMM; baseline=naive") << '\n';
         std::cout << "# Inputs: deterministic modulo-31/modulo-29 patterns; full CPU double reference.\n"
                   << "# CUDA-event intervals bracket operator submission and may include GPU idle time from host dispatch.\n"
                   << "# Host intervals include submission, event calls and completion wait. Transfers/allocations/reference excluded.\n"
+                  << "# logical_intermediate_bytes is analytic write+read payload, not measured DRAM traffic.\n"
                   << "# Fixed order: naive then tiled per shape. No clock locking; repeat runs before drawing conclusions.\n"
-                  << "kernel,m,n,k,warmup,iterations,event_min_ms,event_median_ms,event_p95_ms,host_median_ms,event_gflops,max_abs_error,naive_over_current\n"
+                  << "kernel,variant,planned_launches,logical_intermediate_bytes,m,n,k,warmup,iterations,event_min_ms,event_median_ms,event_p95_ms,host_median_ms,event_gflops,max_abs_error,baseline_over_current\n"
                   << std::fixed << std::setprecision(6);
         for (auto shape : shapes) run(shape, warmup, iterations);
     } catch (const std::exception& error) {

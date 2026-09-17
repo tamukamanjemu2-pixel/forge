@@ -120,7 +120,7 @@ void validate_matmul(
         throw std::invalid_argument("MatMul output must not overlap either input");
 }
 
-void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* stream, MatMulKernel kernel) {
+void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* stream, MatMulKernel kernel, bool activate = false) {
     if (kernel != MatMulKernel::Naive && kernel != MatMulKernel::Tiled)
         throw std::invalid_argument("Unknown MatMul kernel");
     validate_matmul(a, b, output);
@@ -128,13 +128,16 @@ void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* st
         throw std::invalid_argument("MatMul stream and tensors must be on the same device");
 #ifdef FORGE_HAS_CUDA
     detail::DeviceScope scope(a.device().index);
-    const auto launch = kernel == MatMulKernel::Tiled ? launch_matmul_tiled :
-        static_cast<void (*)(const float*, const float*, float*, int, int, int, cudaStream_t)>(launch_matmul);
+    using Launcher = void (*)(const float*, const float*, float*, int, int, int, cudaStream_t);
+    const Launcher launch = activate
+        ? (kernel == MatMulKernel::Tiled ? launch_matmul_tiled_relu : launch_matmul_relu)
+        : (kernel == MatMulKernel::Tiled ? launch_matmul_tiled : static_cast<Launcher>(launch_matmul));
     launch(static_cast<const float*>(a.data()), static_cast<const float*>(b.data()),
                   static_cast<float*>(output.data()), static_cast<int>(a.shape()[0]),
                   static_cast<int>(b.shape()[1]), static_cast<int>(a.shape()[1]),
                   stream ? static_cast<cudaStream_t>(stream->native_handle()) : nullptr);
 #else
+    (void)activate;
     throw std::runtime_error("CUDA MatMul is unavailable: build with FORGE_ENABLE_CUDA=ON");
 #endif
 }
@@ -151,5 +154,11 @@ void matmul(const Tensor& a, const Tensor& b, Tensor& output, MatMulKernel kerne
 }
 void matmul(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream, MatMulKernel kernel) {
     dispatch(a, b, output, &stream, kernel);
+}
+void matmul_relu(const Tensor& a, const Tensor& b, Tensor& output, MatMulKernel kernel) {
+    dispatch(a, b, output, nullptr, kernel, true);
+}
+void matmul_relu(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream, MatMulKernel kernel) {
+    dispatch(a, b, output, &stream, kernel, true);
 }
 } // namespace forge

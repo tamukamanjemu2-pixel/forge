@@ -12,7 +12,7 @@
 namespace {
 using namespace forge;
 
-void run_case(int m, int n, int k, bool explicit_stream, MatMulKernel kernel) {
+void run_case(int m, int n, int k, bool explicit_stream, MatMulKernel kernel, bool fused) {
     std::vector<float> av(m * k), bv(k * n), actual(m * n);
     for (std::size_t i = 0; i < av.size(); ++i) av[i] = (static_cast<int>(i % 17) - 8) / 7.0f;
     for (std::size_t i = 0; i < bv.size(); ++i) bv[i] = (static_cast<int>(i % 13) - 6) / 5.0f;
@@ -47,13 +47,15 @@ void run_case(int m, int n, int k, bool explicit_stream, MatMulKernel kernel) {
         // Prepare the identity before the chain: synchronous upload would otherwise
         // mask ordering errors by completing the first operator.
         copy_tensor(host_eye, eye);
-        if (kernel == MatMulKernel::Naive) matmul(a, b, c, stream);
+        if (fused) matmul_relu(a, b, c, stream, kernel);
+        else if (kernel == MatMulKernel::Naive) matmul(a, b, c, stream);
         else matmul(a, b, c, stream, kernel);
         matmul(c, eye, result, stream, kernel);
         stream.synchronize();
         copy_tensor(result, host_c);
     } else {
-        if (kernel == MatMulKernel::Naive) matmul(a, b, c);
+        if (fused) matmul_relu(a, b, c, kernel);
+        else if (kernel == MatMulKernel::Naive) matmul(a, b, c);
         else matmul(a, b, c, kernel);
         copy_tensor(c, host_c);
     }
@@ -62,6 +64,7 @@ void run_case(int m, int n, int k, bool explicit_stream, MatMulKernel kernel) {
             double expected = 0;
             for (int i = 0; i < k; ++i)
                 expected += static_cast<double>(av[row * k + i]) * bv[i * n + col];
+            if (fused && expected < 0) expected = 0;
             const auto got = actual[row * n + col];
             if (!std::isfinite(got) || std::abs(got - expected) > 1e-4 + 1e-4 * std::abs(expected)) {
                 std::cerr << "MatMul " << m << 'x' << n << 'x' << k << " at " << row << ',' << col
@@ -112,14 +115,16 @@ void check_device_restoration() {
 int main() {
     FORGE_CUDA_CHECK(cudaSetDevice(0));
     for (auto kernel : {forge::MatMulKernel::Naive, forge::MatMulKernel::Tiled}) {
+    for (bool fused : {false, true}) {
     for (bool explicit_stream : {false, true}) {
-        run_case(1, 1, 1, explicit_stream, kernel);
-        run_case(2, 2, 3, explicit_stream, kernel);
-        run_case(15, 16, 17, explicit_stream, kernel);
-        run_case(16, 17, 15, explicit_stream, kernel);
-        run_case(17, 19, 23, explicit_stream, kernel);
-        run_case(32, 48, 16, explicit_stream, kernel);
-        run_case(3, 7, 257, explicit_stream, kernel);
+        run_case(1, 1, 1, explicit_stream, kernel, fused);
+        run_case(2, 2, 3, explicit_stream, kernel, fused);
+        run_case(15, 16, 17, explicit_stream, kernel, fused);
+        run_case(16, 17, 15, explicit_stream, kernel, fused);
+        run_case(17, 19, 23, explicit_stream, kernel, fused);
+        run_case(32, 48, 16, explicit_stream, kernel, fused);
+        run_case(3, 7, 257, explicit_stream, kernel, fused);
+    }
     }
     }
     check_device_restoration();

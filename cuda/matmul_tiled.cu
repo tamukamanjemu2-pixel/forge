@@ -4,6 +4,7 @@
 
 namespace {
 constexpr unsigned tile = 16;
+template<bool Activate>
 __global__ void tiled_kernel(const float* a, const float* b, float* c, int m, int n, int k) {
     __shared__ float as[tile][tile];
     __shared__ float bs[tile][tile];
@@ -20,11 +21,11 @@ __global__ void tiled_kernel(const float* a, const float* b, float* c, int m, in
         for (unsigned i = 0; i < tile; ++i) accumulator += as[ty][i] * bs[i][tx];
         __syncthreads();
     }
-    if (row < static_cast<std::size_t>(m) && col < static_cast<std::size_t>(n)) c[row * n + col] = accumulator;
+    if (row < static_cast<std::size_t>(m) && col < static_cast<std::size_t>(n)) c[row * n + col] = Activate && accumulator < 0.0f ? 0.0f : accumulator;
 }
 }
 
-void launch_matmul_tiled(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream) {
+static void launch_impl(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream, bool activate) {
     if (!a || !b || !c || m <= 0 || n <= 0 || k <= 0)
         throw std::invalid_argument("Invalid tiled MatMul launch arguments");
     const dim3 block(tile, tile);
@@ -35,6 +36,14 @@ void launch_matmul_tiled(const float* a, const float* b, float* c, int m, int n,
     FORGE_CUDA_CHECK(cudaDeviceGetAttribute(&max_y, cudaDevAttrMaxGridDimY, device));
     if (grid.x > static_cast<unsigned>(max_x) || grid.y > static_cast<unsigned>(max_y))
         throw std::overflow_error("Tiled MatMul dimensions exceed device grid limits");
-    tiled_kernel<<<grid, block, 0, stream>>>(a, b, c, m, n, k);
+    if (activate) tiled_kernel<true><<<grid, block, 0, stream>>>(a, b, c, m, n, k);
+    else tiled_kernel<false><<<grid, block, 0, stream>>>(a, b, c, m, n, k);
     FORGE_CUDA_CHECK(cudaGetLastError());
+}
+
+void launch_matmul_tiled(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream) {
+    launch_impl(a, b, c, m, n, k, stream, false);
+}
+void launch_matmul_tiled_relu(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream) {
+    launch_impl(a, b, c, m, n, k, stream, true);
 }

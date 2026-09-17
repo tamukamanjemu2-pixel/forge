@@ -17,6 +17,8 @@ public:
     const Tensor& output(Graph::Value value) const;
     std::size_t allocated_bytes() const;
     const MemoryStatistics& memory_statistics() const;
+    std::size_t fused_pairs() const;
+    std::size_t planned_kernel_launches() const;
 private:
     friend class Runtime;
     struct Impl;
@@ -27,6 +29,7 @@ private:
 struct CompileOptions {
     bool reuse_memory = true;
     MatMulKernel matmul_kernel = MatMulKernel::Naive;
+    bool fuse_matmul_relu = false;
 };
 
 class Runtime {

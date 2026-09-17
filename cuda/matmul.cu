@@ -6,6 +6,7 @@
 
 namespace {
 
+    template<bool Activate>
     __global__ void matmul_kernel(
         const float* a,
         const float* b,
@@ -32,19 +33,20 @@ namespace {
                 b[static_cast<std::size_t>(i) * n + col];
         }
 
-        c[row * n + col] = accumulator;
+        c[row * n + col] = Activate && accumulator < 0.0f ? 0.0f : accumulator;
     }
 
 } // namespace
 
-void launch_matmul(
+static void launch_impl(
     const float* a,
     const float* b,
     float* c,
     int m,
     int n,
     int k,
-    cudaStream_t stream
+    cudaStream_t stream,
+    bool activate
 ) {
     if (!a || !b || !c || m <= 0 || n <= 0 || k <= 0)
         throw std::invalid_argument("Invalid MatMul launch arguments");
@@ -64,17 +66,18 @@ void launch_matmul(
     if (grid.x > static_cast<unsigned>(max_x) || grid.y > static_cast<unsigned>(max_y))
         throw std::overflow_error("MatMul dimensions exceed device grid limits");
 
-    matmul_kernel<<<grid, block, 0, stream>>>(
-        a,
-        b,
-        c,
-        m,
-        n,
-        k
-    );
+    if (activate) matmul_kernel<true><<<grid, block, 0, stream>>>(a, b, c, m, n, k);
+    else matmul_kernel<false><<<grid, block, 0, stream>>>(a, b, c, m, n, k);
     forge::detail::cuda_check(cudaGetLastError(), "MatMul kernel launch");
 }
 
 void launch_matmul(const float* a, const float* b, float* c, int m, int n, int k) {
     launch_matmul(a, b, c, m, n, k, nullptr);
+}
+
+void launch_matmul(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream) {
+    launch_impl(a, b, c, m, n, k, stream, false);
+}
+void launch_matmul_relu(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream) {
+    launch_impl(a, b, c, m, n, k, stream, true);
 }

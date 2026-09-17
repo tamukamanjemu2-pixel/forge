@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(FORGE_ENABLE_CUDA "Build NVIDIA CUDA operators, tests, and benchmarks" ON)
 include(CTest)
 
-add_library(forge_core src/tensor.cpp src/memory.cpp src/stream.cpp src/graph.cpp src/memory_plan.cpp)
+add_library(forge_core src/tensor.cpp src/memory.cpp src/stream.cpp src/graph.cpp src/graph_plan.cpp src/memory_plan.cpp)
 target_include_directories(forge_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(forge_ops src/ops/matmul.cpp src/ops/activations.cpp)
@@ -41,6 +41,9 @@ if(BUILD_TESTING)
     add_executable(forge_memory_plan_test tests/memory_plan_test.cpp)
     target_link_libraries(forge_memory_plan_test PRIVATE forge_core)
     add_test(NAME memory_planning COMMAND forge_memory_plan_test)
+    add_executable(forge_fusion_plan_test tests/fusion_plan_test.cpp)
+    target_link_libraries(forge_fusion_plan_test PRIVATE forge_core)
+    add_test(NAME fusion_planning COMMAND forge_fusion_plan_test)
 endif()
 
 if(FORGE_ENABLE_CUDA)
@@ -70,6 +73,9 @@ if(FORGE_ENABLE_CUDA)
 
     add_executable(forge_matmul_compare benchmarks/matmul_compare.cpp)
     target_link_libraries(forge_matmul_compare PRIVATE forge_ops forge_cuda)
+    add_executable(forge_fusion_compare benchmarks/matmul_compare.cpp)
+    target_compile_definitions(forge_fusion_compare PRIVATE FORGE_COMPARE_FUSION=1)
+    target_link_libraries(forge_fusion_compare PRIVATE forge_ops forge_cuda)
 
     add_executable(forge_inference examples/inference.cpp)
     target_link_libraries(forge_inference PRIVATE forge_runtime)

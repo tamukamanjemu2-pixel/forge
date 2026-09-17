@@ -12,7 +12,7 @@ template<class E, class F> void expect(F action) {
     try { action(); } catch (const E&) { return; }
     throw std::runtime_error("Expected runtime rejection");
 }
-void run(int batch, bool reuse, forge::MatMulKernel kernel) {
+void run(int batch, bool reuse, forge::MatMulKernel kernel, bool fused) {
     using namespace forge;
     constexpr int inputs = 3, hidden = 5, classes = 2;
     std::vector<float> x(batch * inputs), w1(inputs * hidden), w2(hidden * classes), result(batch * classes);
@@ -37,14 +37,16 @@ void run(int batch, bool reuse, forge::MatMulKernel kernel) {
         auto activation = graph.relu(intermediate);
         output = graph.softmax(graph.matmul(activation, c));
         graph.output(output);
-        return runtime.compile(graph, {.reuse_memory = reuse, .matmul_kernel = kernel});
+        return runtime.compile(graph, {.reuse_memory = reuse, .matmul_kernel = kernel, .fuse_matmul_relu = fused});
     }(); // Graph builder is destroyed; compiled snapshot remains valid.
     expect<std::logic_error>([&] { executable.output(output); });
     expect<std::invalid_argument>([&] { executable.output(intermediate); });
-    check(executable.memory_statistics().tensor_bytes == static_cast<std::size_t>(batch * (2 * hidden + 2 * classes) * 4), "Payload accounting");
+    check(executable.memory_statistics().tensor_bytes == static_cast<std::size_t>(batch * ((fused ? 1 : 2) * hidden + 2 * classes) * 4), "Payload accounting");
     check(executable.allocated_bytes() == executable.memory_statistics().reserved_bytes, "Reserved accounting");
-    check(executable.memory_statistics().allocation_count == (reuse ? 2u : 4u), "Allocation count");
-    check(executable.memory_statistics().reuse_count == (reuse ? 2u : 0u), "Reuse count");
+    check(executable.memory_statistics().allocation_count == (reuse ? 2u : (fused ? 3u : 4u)), "Allocation count");
+    check(executable.memory_statistics().reuse_count == (reuse ? (fused ? 1u : 2u) : 0u), "Reuse count");
+    check(executable.fused_pairs() == (fused ? 1u : 0u), "Fusion count");
+    check(executable.planned_kernel_launches() == (fused ? 3u : 4u), "Planned launches");
     const void* first_pointer = nullptr;
     for (int iteration = 0; iteration < 2; ++iteration) {
         for (auto& value : x) value += iteration * 0.75f;
@@ -117,7 +119,8 @@ void retained_output() {
 }
 int main() {
     for (auto kernel : {forge::MatMulKernel::Naive, forge::MatMulKernel::Tiled})
-        for (bool reuse : {false, true}) { run(1, reuse, kernel); run(7, reuse, kernel); run(32, reuse, kernel); }
+        for (bool reuse : {false, true})
+            for (bool fused : {false, true}) { run(1, reuse, kernel, fused); run(7, reuse, kernel, fused); run(32, reuse, kernel, fused); }
     retained_output();
     std::cout << "Graph runtime inference tests passed\n";
 }

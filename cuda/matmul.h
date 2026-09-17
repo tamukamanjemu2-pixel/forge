@@ -16,3 +16,6 @@ void launch_matmul(const float* a, const float* b, float* c,
 
 void launch_matmul_tiled(const float* a, const float* b, float* c,
                          int m, int n, int k, cudaStream_t stream);
+
+void launch_matmul_relu(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream);
+void launch_matmul_tiled_relu(const float* a, const float* b, float* c, int m, int n, int k, cudaStream_t stream);

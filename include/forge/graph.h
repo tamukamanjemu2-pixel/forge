@@ -16,7 +16,7 @@ public:
         std::size_t index_ = 0;
         std::shared_ptr<const int> owner_;
     };
-    enum class Operation { Input, MatMul, ReLU, Softmax };
+    enum class Operation { Input, MatMul, ReLU, Softmax, MatMulReLU, Elided };
     struct Node {
         Operation operation;
         std::vector<std::size_t> inputs;

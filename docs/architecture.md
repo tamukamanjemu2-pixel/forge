@@ -56,7 +56,7 @@ Graph values carry a private shared identity token and an index. Foreign, defaul
 
 `Runtime::execute` dispatches in dependency order on the executable-owned stream, without per-operator barriers. It synchronizes at completion and marks output availability only on success. On a dispatch failure it attempts to drain earlier launches; a failure while draining propagates as the CUDA error. This API is blocking and does not support concurrent use of one executable. Fatal CUDA errors may require context recovery outside this runtime.
 
-The executable owns intermediate and computed-output storage until destruction or move assignment. Marked input-only outputs remain borrowed. Output tensor references remain valid only while their executable storage lives; another execution overwrites prior results. `allocated_bytes()` counts reserved slot capacities including padding, excluding borrowed inputs and CUDA stream/driver overhead. Lifetime-based reuse is implemented in milestone 6; cross-executable pooling, fusion, and a kernel registry are still deferred.
+The executable owns intermediate and computed-output storage until destruction or move assignment. Marked input-only outputs remain borrowed. Output tensor references remain valid only while their executable storage lives; another execution overwrites prior results. `allocated_bytes()` counts reserved slot capacities including padding, excluding borrowed inputs and CUDA stream/driver overhead. Lifetime-based reuse is implemented in milestone 6; cross-executable pooling and a general kernel registry are still deferred; fusion is opt-in.
 
 ## Lifetime memory planning (milestone 6)
 
@@ -73,3 +73,11 @@ The no-reuse compile option creates dedicated padded slots and preserves the exe
 MatMulKernel selects Naive or Tiled through additional operator overloads and CompileOptions::matmul_kernel. Existing overloads retain Naive. Runtime stores the selection at compilation and applies it to each graph MatMul. Unknown enum values are rejected before hardware access. This is explicit two-kernel dispatch, not yet a general plugin registry or automatic tuning system.
 
 The tiled Float32 kernel uses a 16×16 block and two shared-memory tiles. Threads cooperatively load coalesced rows, zero-pad partial tiles, synchronize, accumulate one output per thread, then synchronize before loading the next tile. No thread returns before the shared barriers. Launches use the supplied stream and retain dimension/error checks. The algorithm is a candidate pending NVIDIA correctness and measurement, not an accepted performance improvement.
+
+## MatMul–ReLU fusion (milestone 8)
+
+`plan_graph` copies node metadata and preserves value indices and marked output identities. It counts producer consumers before transforming eligible pairs. A sole ReLU consumer becomes MatMulReLU with the original matrix operands; its MatMul producer becomes an Elided marker with no inputs. Marked raw MatMul outputs and multi-consumer producers block fusion. The source graph is unchanged.
+
+The transformed operation executes at the former ReLU position in the valid original topological order. Memory planning uses the transformed dependencies, extending matrix operand lifetimes to that point and excluding elided storage. This avoids reusing a GEMM operand too early when an independent branch occurs between the original producer and ReLU. Elided nodes perform no work and receive no storage slot.
+
+Naive and tiled kernels compile distinct plain/fused specializations. The fused epilogue clamps negative accumulators before their output store, preserving the standalone ReLU comparison behavior for NaN and signed zero. No separate activation launch or intermediate output is needed. Explicit graph fusion defaults to false and no performance improvement is assumed.

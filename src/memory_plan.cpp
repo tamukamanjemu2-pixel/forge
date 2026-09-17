@@ -1,4 +1,5 @@
 #include "forge/memory_plan.h"
+#include "forge/graph_plan.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -10,12 +11,13 @@ std::size_t add(std::size_t a, std::size_t b) {
     return a + b;
 }
 }
-MemoryPlan plan_memory(const Graph& graph, bool reuse, std::size_t alignment) {
+MemoryPlan plan_memory(const Graph& graph, bool reuse, std::size_t alignment, bool fuse_matmul_relu) {
     if (alignment == 0 || (alignment & (alignment - 1)) != 0)
         throw std::invalid_argument("Memory plan alignment must be a power of two");
     MemoryPlan plan;
-    plan.order = graph.execution_order();
-    const auto& nodes = graph.nodes();
+    const auto program = plan_graph(graph, fuse_matmul_relu);
+    plan.order = program.order;
+    const auto& nodes = program.nodes;
     const auto count = nodes.size();
     plan.slots.assign(count, MemoryPlan::no_slot);
     plan.first_use.resize(count);
@@ -34,7 +36,7 @@ MemoryPlan plan_memory(const Graph& graph, bool reuse, std::size_t alignment) {
     std::size_t live = 0;
     for (std::size_t step = 0; step < count; ++step) {
         const auto node = plan.order[step];
-        if (nodes[node].operation != Graph::Operation::Input) {
+        if (nodes[node].operation != Graph::Operation::Input && nodes[node].operation != Graph::Operation::Elided) {
             const auto bytes = nodes[node].metadata.nbytes();
             const auto padded = add(bytes, alignment - 1) & ~(alignment - 1);
             plan.statistics.tensor_bytes = add(plan.statistics.tensor_bytes, bytes);

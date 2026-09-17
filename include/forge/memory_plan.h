@@ -21,5 +21,5 @@ struct MemoryPlan {
 };
 // Pure metadata planning; performs no CUDA calls or allocations of device storage.
 // Slot reuse is safe only for the supplied graph's serial execution order.
-MemoryPlan plan_memory(const Graph& graph, bool reuse = true, std::size_t alignment = 256);
+MemoryPlan plan_memory(const Graph& graph, bool reuse = true, std::size_t alignment = 256, bool fuse_matmul_relu = false);
 } // namespace forge

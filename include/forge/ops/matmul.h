@@ -21,4 +21,8 @@ namespace forge {
     void matmul(const Tensor& a, const Tensor& b, Tensor& output, MatMulKernel kernel);
     void matmul(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream, MatMulKernel kernel);
 
+    // Single-launch GEMM with a ReLU epilogue; same validation/stream contract.
+    void matmul_relu(const Tensor& a, const Tensor& b, Tensor& output, MatMulKernel kernel = MatMulKernel::Naive);
+    void matmul_relu(const Tensor& a, const Tensor& b, Tensor& output, const Stream& stream, MatMulKernel kernel = MatMulKernel::Naive);
+
 } // namespace forge

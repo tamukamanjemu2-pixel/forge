@@ -1,6 +1,6 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; cross-executable memory pooling, fusion, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; cross-executable memory pooling, FP16, and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
@@ -84,7 +84,7 @@ forge/
 - [x] Per-executable storage slots and tensor-lifetime reuse (GPU validation pending)
 - [x] Computation graph and single-stream execution scheduler (GPU validation pending)
 - [ ] CUDA streams, batching, and asynchronous execution
-- [ ] Operator fusion
+- [x] Opt-in MatMul–ReLU fusion (GPU correctness/performance pending)
 - [ ] NVIDIA Nsight profiling and bottleneck reports
 - [ ] Multi-GPU execution experiments
 
@@ -158,9 +158,9 @@ runtime.execute(executable);
 // Copy executable.output(output) to a matching CPU tensor to read results.
 ```
 
-Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Dead-node pruning, graph fusion, asynchronous graph submission, and cross-executable pooling are not implemented yet.
+Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Dead-node pruning, asynchronous graph submission, and cross-executable pooling are not implemented yet.
 
-After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–7 remains deferred. The current full suite registers ten tests.
+After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–8 remains deferred. The current full suite registers eleven tests.
 
 If the Mac linker rejects `arm64e.x1` in the selected macOS 27 SDK, the locally verified workaround is a separate build using the installed 26.5 SDK:
 
@@ -204,3 +204,18 @@ After the GPU test suite passes, compare on the same GPU/build:
 ```
 
 The benchmark prints GPU/toolchain metadata and CSV timing rows. Full CPU-reference checks, allocations and transfers are outside timing. CUDA-event intervals bracket operator submission and may include GPU idle time due to host dispatch; host timings additionally include event calls and waiting. Neither is an end-to-end model measurement. The printed ratio is computed from the current run's event medians, not historical baseline numbers. Defaults are ten warmups and fifty samples per implementation for each shape. Large custom dimensions also incur a full CPU GEMM reference calculation.
+
+## MatMul–ReLU fusion
+
+```cpp
+auto executable = runtime.compile(graph, {
+    .matmul_kernel = forge::MatMulKernel::Tiled,
+    .fuse_matmul_relu = true
+});
+```
+
+Fusion is off by default. Only a MatMul whose sole consumer is ReLU and whose raw result is not a graph output is eligible. The fused CUDA epilogue applies ReLU before storing the final GEMM result. Both naive and tiled implementations support it. Compilation replans tensor lifetimes after transformation; no unactivated intermediate buffer is allocated for an eligible pair.
+
+`fused_pairs()` and `planned_kernel_launches()` report compile-time counts, not profiler telemetry. For later measurements, run `./build/cuda/forge_fusion_compare` after correctness tests pass. It compares separate and fused MatMul–ReLU for each kernel, using the same data/reference and event/host timing methodology as the GEMM comparison. Logical intermediate bytes are an analytical read/write payload estimate, not measured DRAM traffic. GPU correctness and performance are still pending.
+
+See `docs/status.md` for completed work, validation gaps, and remaining project stages.
