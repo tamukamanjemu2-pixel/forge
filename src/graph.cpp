@@ -20,8 +20,8 @@ Graph::Value Graph::append(Operation operation, std::vector<std::size_t> inputs,
     return value;
 }
 Graph::Value Graph::input(const Tensor& tensor) {
-    if (tensor.dtype() != DataType::Float32 || tensor.device().type != DeviceType::CUDA)
-        throw std::invalid_argument("Graph inputs currently require Float32 CUDA descriptors");
+    if ((tensor.dtype() != DataType::Float32 && tensor.dtype() != DataType::Float16) || tensor.device().type != DeviceType::CUDA)
+        throw std::invalid_argument("Graph inputs require Float32 or Float16 CUDA descriptors");
     if (!nodes_.empty() && tensor.device() != nodes_.front().metadata.device())
         throw std::invalid_argument("All graph values must use one CUDA device");
     return append(Operation::Input, {}, tensor);
@@ -30,6 +30,7 @@ Graph::Value Graph::matmul(Value a, Value b) {
     const auto ai = index(a), bi = index(b);
     const auto& left = nodes_[ai].metadata;
     const auto& right = nodes_[bi].metadata;
+    if (left.dtype() != right.dtype()) throw std::invalid_argument("Graph MatMul dtype mismatch");
     if (left.ndim() != 2 || right.ndim() != 2 || left.shape()[1] != right.shape()[0])
         throw std::invalid_argument("Graph MatMul requires compatible matrices");
     Tensor result({left.shape()[0], right.shape()[1]}, left.dtype(), left.device());

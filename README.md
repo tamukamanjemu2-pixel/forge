@@ -1,6 +1,6 @@
 # Forge
 
-A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; cross-executable memory pooling, FP16, and Tensor Core execution are future milestones.
+A C++20/CUDA GPU inference runtime under development. The current local implementation contains non-owning contiguous tensor metadata, move-only CPU/CUDA storage buffers, synchronous copies, owned CUDA streams, Float32/Float16 CUDA MatMul, ReLU, and last-axis Softmax operators, naive GEMM and vector-add kernels, GPU benchmarks, and correctness tests. Graph construction and a compiled single-stream execution runtime are implemented; cross-executable memory pooling and Tensor Core execution are future milestones.
 
 ## Build and test on macOS
 
@@ -80,7 +80,8 @@ forge/
 - [x] Naive GEMM baseline, operator, tests, and benchmark
 - [x] Selectable shared-memory tiled GEMM (GPU correctness/performance pending)
 - [x] ReLU and stable last-axis Softmax (GPU validation pending)
-- [ ] FP16 execution and Tensor Core path
+- [x] FP16 storage with Float32 accumulation (GPU validation pending)
+- [ ] Tensor Core execution
 - [x] Per-executable storage slots and tensor-lifetime reuse (GPU validation pending)
 - [x] Computation graph and single-stream execution scheduler (GPU validation pending)
 - [ ] CUDA streams, batching, and asynchronous execution
@@ -136,7 +137,7 @@ forge::softmax(hidden, probabilities, stream);
 stream.synchronize();
 ```
 
-Both operators require matching contiguous Float32 CUDA tensors with non-overlapping storage. The three-argument form enqueues on the supplied stream; omitting the stream uses the tensor device's default stream. ReLU accepts scalars and arbitrary ranks and propagates NaN. Softmax requires rank >= 1 and normalizes each row along the last dimension. Its supported input contract is finite logits; it subtracts the row maximum before exponentiation. Non-finite logits have no defined probability semantics and are not checked by a host-side scan.
+Both operators require matching contiguous Float32 or Float16 CUDA tensors with non-overlapping storage. The three-argument form enqueues on the supplied stream; omitting the stream uses the tensor device's default stream. ReLU accepts scalars and arbitrary ranks and propagates NaN. Softmax requires rank >= 1 and normalizes each row along the last dimension. Its supported input contract is finite logits; it subtracts the row maximum before exponentiation. Non-finite logits have no defined probability semantics and are not checked by a host-side scan.
 
 Milestone 4 host validation passed; GPU compilation and correctness are pending. No activation performance results have been measured.
 
@@ -158,9 +159,9 @@ runtime.execute(executable);
 // Copy executable.output(output) to a matching CPU tensor to read results.
 ```
 
-Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and Float32; matrix batch size is the first dimension. Dead-node pruning, asynchronous graph submission, and cross-executable pooling are not implemented yet.
+Inputs and weights are borrowed CUDA tensors and must stay alive. Compilation owns intermediate/output allocations; subsequent executions reuse them. Execution blocks once at the end of the graph. Marked outputs become available after a successful run. Graphs are single-device and support Float32/Float16 values; MatMul operands must share a dtype; matrix batch size is the first dimension. Dead-node pruning, asynchronous graph submission, and cross-executable pooling are not implemented yet.
 
-After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–8 remains deferred. The current full suite registers eleven tests.
+After building on NVIDIA hardware, run `./build/cuda/forge_inference`. GPU validation for milestones 4–9 remains deferred. The current full suite registers twelve tests.
 
 If the Mac linker rejects `arm64e.x1` in the selected macOS 27 SDK, the locally verified workaround is a separate build using the installed 26.5 SDK:
 
@@ -193,7 +194,7 @@ forge::matmul(a, b, output, stream, forge::MatMulKernel::Tiled);
 auto executable = runtime.compile(graph, {.matmul_kernel = forge::MatMulKernel::Tiled});
 ```
 
-The tiled path is Float32 only and uses neither FP16 nor Tensor Cores. It is implemented but has not yet been compiled/tested on NVIDIA hardware or benchmarked. Kernel selection does not change the public tensor contract or stream policy.
+The tiled path supports Float32 or Float16 storage with Float32 accumulation. Neither current GEMM path uses Tensor Cores. It is implemented but has not yet been compiled/tested on NVIDIA hardware or benchmarked. Kernel selection does not change the public tensor contract or stream policy.
 
 After the GPU test suite passes, compare on the same GPU/build:
 
@@ -219,3 +220,11 @@ Fusion is off by default. Only a MatMul whose sole consumer is ReLU and whose ra
 `fused_pairs()` and `planned_kernel_launches()` report compile-time counts, not profiler telemetry. For later measurements, run `./build/cuda/forge_fusion_compare` after correctness tests pass. It compares separate and fused MatMul–ReLU for each kernel, using the same data/reference and event/host timing methodology as the GEMM comparison. Logical intermediate bytes are an analytical read/write payload estimate, not measured DRAM traffic. GPU correctness and performance are still pending.
 
 See `docs/status.md` for completed work, validation gaps, and remaining project stages.
+
+## FP16 execution
+
+Use `DataType::Float16` with two-byte IEEE binary16 storage. Tensor metadata never converts data: upload actual binary16 values, such as a host `std::vector<__half>` populated with CUDA's `__float2half_rn`, rather than relabelling a Float32 allocation. Input/output dtypes must match, and graph MatMul rejects mixed operand types. Independent graph branches can have different dtypes; there is no implicit conversion operator.
+
+FP16 GEMM converts operands to Float32 for accumulation and rounds once when writing its FP16 output. Fusion applies ReLU before that final rounding. FP16 Softmax performs maximum and sum reductions in Float32 and recomputes exponentials for normalization before rounding final probabilities. ReLU preserves nonnegative half values and propagates NaNs. Overflow/underflow follows FP16 output representation; finite logits remain the supported Softmax domain.
+
+After GPU correctness testing, run `forge_fp16_compare` or `forge_fp16_fusion_compare` from `build/cuda/`. Their references use quantized inputs and half-rounded outputs; tolerances and dtype are explicit. No FP16 speedup has been measured, and these scalar/shared-memory kernels are not Tensor Core kernels.

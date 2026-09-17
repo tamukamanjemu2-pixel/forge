@@ -5,6 +5,12 @@
 #ifndef FORGE_COMPARE_FUSION
 #define FORGE_COMPARE_FUSION 0
 #endif
+#ifndef FORGE_COMPARE_FP16
+#define FORGE_COMPARE_FP16 0
+#endif
+#if FORGE_COMPARE_FP16
+#include <cuda_fp16.h>
+#endif
 #include "../src/cuda_support.h"
 #include <algorithm>
 #include <charconv>
@@ -17,6 +23,17 @@
 #include <vector>
 
 namespace {
+#if FORGE_COMPARE_FP16
+using Storage = __half;
+constexpr auto dtype = forge::DataType::Float16;
+Storage encode_value(float value) { return __float2half_rn(value); }
+float decode_value(Storage value) { return __half2float(value); }
+#else
+using Storage = float;
+constexpr auto dtype = forge::DataType::Float32;
+Storage encode_value(float value) { return value; }
+float decode_value(Storage value) { return value; }
+#endif
 class Event {
 public:
     Event() { FORGE_CUDA_CHECK(cudaEventCreate(&handle)); }
@@ -41,24 +58,25 @@ struct Shape { int m, n, k; };
 void run(Shape shape, int warmup, int iterations) {
     using namespace forge;
     const auto [m, n, k] = shape;
-    std::vector<float> av(static_cast<std::size_t>(m) * k), bv(static_cast<std::size_t>(k) * n), actual(static_cast<std::size_t>(m) * n);
-    for (std::size_t i = 0; i < av.size(); ++i) av[i] = (static_cast<int>(i % 31) - 15) / 16.0f;
-    for (std::size_t i = 0; i < bv.size(); ++i) bv[i] = (static_cast<int>(i % 29) - 14) / 16.0f;
+    std::vector<Storage> av(static_cast<std::size_t>(m) * k), bv(static_cast<std::size_t>(k) * n), actual(static_cast<std::size_t>(m) * n);
+    for (std::size_t i = 0; i < av.size(); ++i) av[i] = encode_value((static_cast<int>(i % 31) - 15) / 16.0f);
+    for (std::size_t i = 0; i < bv.size(); ++i) bv[i] = encode_value((static_cast<int>(i % 29) - 14) / 16.0f);
     // Full double-precision reference; performed outside all measured intervals.
     std::vector<double> expected(actual.size(), 0);
     for (int row = 0; row < m; ++row)
         for (int inner = 0; inner < k; ++inner)
             for (int col = 0; col < n; ++col)
                 expected[static_cast<std::size_t>(row) * n + col] +=
-                    static_cast<double>(av[static_cast<std::size_t>(row) * k + inner]) * bv[static_cast<std::size_t>(inner) * n + col];
+                    static_cast<double>(decode_value(av[static_cast<std::size_t>(row) * k + inner])) * decode_value(bv[static_cast<std::size_t>(inner) * n + col]);
     if (FORGE_COMPARE_FUSION) for (auto& value : expected) value = std::max(value, 0.0);
-    Buffer scratch(actual.size() * 4, Device::cuda());
-    auto intermediate = scratch.view({m, n}, DataType::Float32);
-    Buffer as(av.size() * 4, Device::cuda()), bs(bv.size() * 4, Device::cuda()), cs(actual.size() * 4, Device::cuda());
-    auto a = as.view({m, k}, DataType::Float32), b = bs.view({k, n}, DataType::Float32), c = cs.view({m, n}, DataType::Float32);
-    Tensor ha({m, k}, DataType::Float32, Device::cpu(), av.data());
-    Tensor hb({k, n}, DataType::Float32, Device::cpu(), bv.data());
-    Tensor hc({m, n}, DataType::Float32, Device::cpu(), actual.data());
+    if (FORGE_COMPARE_FP16) for (auto& value : expected) value = decode_value(encode_value(static_cast<float>(value)));
+    Buffer scratch(actual.size() * sizeof(Storage), Device::cuda());
+    auto intermediate = scratch.view({m, n}, dtype);
+    Buffer as(av.size() * sizeof(Storage), Device::cuda()), bs(bv.size() * sizeof(Storage), Device::cuda()), cs(actual.size() * sizeof(Storage), Device::cuda());
+    auto a = as.view({m, k}, dtype), b = bs.view({k, n}, dtype), c = cs.view({m, n}, dtype);
+    Tensor ha({m, k}, dtype, Device::cpu(), av.data());
+    Tensor hb({k, n}, dtype, Device::cpu(), bv.data());
+    Tensor hc({m, n}, dtype, Device::cpu(), actual.data());
     copy_tensor(ha, a); copy_tensor(hb, b);
     Stream stream;
     const auto native = static_cast<cudaStream_t>(stream.native_handle());
@@ -79,8 +97,8 @@ void run(Shape shape, int warmup, int iterations) {
         copy_tensor(c, hc);
         double max_error = 0;
         for (std::size_t i = 0; i < actual.size(); ++i) {
-            const auto error = std::abs(actual[i] - expected[i]);
-            if (!std::isfinite(actual[i]) || error > 1e-4 + 1e-4 * std::abs(expected[i]))
+            const auto error = std::abs(decode_value(actual[i]) - expected[i]);
+            if (!std::isfinite(decode_value(actual[i])) || error > (FORGE_COMPARE_FP16 ? 0.002 : 0.0001) * (1 + std::abs(expected[i])))
                 throw std::runtime_error("Benchmark correctness check failed before timing");
             max_error = std::max(max_error, error);
         }
@@ -106,7 +124,7 @@ void run(Shape shape, int warmup, int iterations) {
         if (variant == 0) separate_median = median;
         std::cout << (kernel == MatMulKernel::Naive ? "naive" : "tiled") << ',' << (FORGE_COMPARE_FUSION ? (variant ? "fused" : "separate") : "gemm") << ','
                   << (FORGE_COMPARE_FUSION && variant == 0 ? 2 : 1) << ','
-                  << (FORGE_COMPARE_FUSION && variant == 0 ? 2 * actual.size() * sizeof(float) : 0) << ',' << m << ',' << n << ',' << k << ','
+                  << (FORGE_COMPARE_FUSION && variant == 0 ? 2 * actual.size() * sizeof(Storage) : 0) << ',' << m << ',' << n << ',' << k << ','
                   << warmup << ',' << iterations << ',' << percentile(gpu_ms, 0) << ',' << median << ','
                   << percentile(gpu_ms, 0.95) << ',' << percentile(host_ms, 0.5) << ','
                   << (2.0 * m * n * k / (median * 1e6)) << ',' << max_error << ',' << (FORGE_COMPARE_FUSION ? separate_median : naive_median) / median << '\n';
@@ -134,10 +152,11 @@ int main(int argc, char** argv) {
                   << ", CUDA_headers=" << CUDART_VERSION << ", CUDA_runtime=" << runtime << ", driver=" << driver
                   << ", host_compiler=" << __VERSION__ << '\n';
 #ifdef NDEBUG
-        std::cout << "# build=Release-like (NDEBUG), dtype=Float32\n";
+        std::cout << "# build=Release-like (NDEBUG)\n";
 #else
-        std::cout << "# build=assertions-enabled, dtype=Float32\n";
+        std::cout << "# build=assertions-enabled\n";
 #endif
+        std::cout << "# dtype=" << (FORGE_COMPARE_FP16 ? "Float16" : "Float32") << ", accumulation=Float32, Tensor_Cores=no\n";
         std::cout << "# Mode=" << (FORGE_COMPARE_FUSION ? "MatMul+ReLU; baseline=separate per kernel" : "GEMM; baseline=naive") << '\n';
         std::cout << "# Inputs: deterministic modulo-31/modulo-29 patterns; full CPU double reference.\n"
                   << "# CUDA-event intervals bracket operator submission and may include GPU idle time from host dispatch.\n"

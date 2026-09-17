@@ -3,6 +3,7 @@
 #include "forge/stream.h"
 #ifdef FORGE_HAS_CUDA
 #include "matmul.h"
+#include "fp16.h"
 #include "../cuda_support.h"
 #endif
 
@@ -28,12 +29,11 @@ void validate_matmul(
     }
 
     if (
-        a.dtype() != DataType::Float32 ||
-        b.dtype() != DataType::Float32 ||
-        output.dtype() != DataType::Float32
+        (a.dtype() != DataType::Float32 && a.dtype() != DataType::Float16) ||
+        b.dtype() != a.dtype() || output.dtype() != a.dtype()
     ) {
         throw std::invalid_argument(
-            "MatMul currently supports Float32 only"
+            "MatMul requires matching Float32 or Float16 tensors"
         );
     }
 
@@ -128,6 +128,13 @@ void dispatch(const Tensor& a, const Tensor& b, Tensor& output, const Stream* st
         throw std::invalid_argument("MatMul stream and tensors must be on the same device");
 #ifdef FORGE_HAS_CUDA
     detail::DeviceScope scope(a.device().index);
+    if (a.dtype() == DataType::Float16) {
+        launch_matmul_fp16(a.data(), b.data(), output.data(), static_cast<int>(a.shape()[0]),
+                          static_cast<int>(b.shape()[1]), static_cast<int>(a.shape()[1]),
+                          stream ? static_cast<cudaStream_t>(stream->native_handle()) : nullptr,
+                          kernel == MatMulKernel::Tiled, activate);
+        return;
+    }
     using Launcher = void (*)(const float*, const float*, float*, int, int, int, cudaStream_t);
     const Launcher launch = activate
         ? (kernel == MatMulKernel::Tiled ? launch_matmul_tiled_relu : launch_matmul_relu)

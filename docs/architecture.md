@@ -81,3 +81,13 @@ The tiled Float32 kernel uses a 16×16 block and two shared-memory tiles. Thread
 The transformed operation executes at the former ReLU position in the valid original topological order. Memory planning uses the transformed dependencies, extending matrix operand lifetimes to that point and excluding elided storage. This avoids reusing a GEMM operand too early when an independent branch occurs between the original producer and ReLU. Elided nodes perform no work and receive no storage slot.
 
 Naive and tiled kernels compile distinct plain/fused specializations. The fused epilogue clamps negative accumulators before their output store, preserving the standalone ReLU comparison behavior for NaN and signed zero. No separate activation launch or intermediate output is needed. Explicit graph fusion defaults to false and no performance improvement is assumed.
+
+## FP16 execution (milestone 9)
+
+Operator dispatch now accepts matching Float32 or Float16 tensors. Int32 remains metadata/storage-only. Graph inputs accept either floating dtype; MatMul enforces operand dtype equality and inferred outputs preserve that dtype. Unary operators preserve input dtype. There are no implicit casts; independently typed branches are permitted on the same device.
+
+The dedicated FP16 backend stores operands/results as IEEE binary16. Naive and tiled GEMM accumulate converted values in Float32 and round results with __float2half_rn. The tiled path stages half operands in shared memory. Fused GEMM applies ReLU before output conversion; negative underflow can therefore differ in zero sign from a separately rounded GEMM followed by ReLU, but not numeric value. Neither variant uses Tensor Core instructions.
+
+FP16 Softmax reduces maximum/sum in Float32 and performs a third input pass to normalize without storing half-rounded exponentials. Final probabilities may underflow to zero and their sum is subject to half rounding. The supported domain remains finite logits; GEMM values outside representable FP16 range can overflow on storage, and the runtime does not silently rescale them.
+
+GPU reference tests quantize host inputs first and explicitly round intermediate graph values at storage boundaries. They cover both kernels, stream paths, fusion/reuse options and probability tolerances. The shared comparison benchmark has separate Float32/Float16 builds; precision is included in metadata.

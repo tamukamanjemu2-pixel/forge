@@ -5,6 +5,7 @@
 namespace forge {
 
     class Stream;
+    // Matching Float32/Float16 storage; accumulation is Float32.
     enum class MatMulKernel { Naive, Tiled };
     // Enqueue on the tensor device's default stream; does not synchronize.
 

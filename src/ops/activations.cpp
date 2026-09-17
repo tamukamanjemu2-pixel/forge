@@ -4,13 +4,14 @@
 #include <stdexcept>
 #ifdef FORGE_HAS_CUDA
 #include "activations.h"
+#include "fp16.h"
 #include "../cuda_support.h"
 #endif
 namespace forge {
 namespace {
 void dispatch(const Tensor& input, Tensor& output, const Stream* stream, bool normalize) {
-    if (input.dtype() != DataType::Float32 || output.dtype() != DataType::Float32)
-        throw std::invalid_argument("Activation requires Float32 tensors");
+    if ((input.dtype() != DataType::Float32 && input.dtype() != DataType::Float16) || output.dtype() != input.dtype())
+        throw std::invalid_argument("Activation requires matching Float32 or Float16 tensors");
     if (input.shape() != output.shape())
         throw std::invalid_argument("Activation input/output shapes must match");
     if (input.device().type != DeviceType::CUDA || input.device() != output.device())
@@ -30,6 +31,13 @@ void dispatch(const Tensor& input, Tensor& output, const Stream* stream, bool no
 #ifdef FORGE_HAS_CUDA
     detail::DeviceScope scope(input.device().index);
     auto handle = stream ? static_cast<cudaStream_t>(stream->native_handle()) : nullptr;
+    if (input.dtype() == DataType::Float16) {
+        if (normalize) {
+            const auto columns = static_cast<std::size_t>(input.shape().back());
+            launch_softmax_fp16(input.data(), output.data(), input.numel() / columns, columns, handle);
+        } else launch_relu_fp16(input.data(), output.data(), input.numel(), handle);
+        return;
+    }
     if (normalize) {
         const auto columns = static_cast<std::size_t>(input.shape().back());
         launch_softmax(static_cast<const float*>(input.data()), static_cast<float*>(output.data()),

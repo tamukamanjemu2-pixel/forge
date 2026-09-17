@@ -46,7 +46,15 @@ int main() {
     expect<std::overflow_error>([&] { matmul(huge_a, one, huge_c); }, "kernel dimension limit");
     expect<std::invalid_argument>([] { Stream stream(Device::cpu()); }, "CPU stream");
     expect<std::invalid_argument>([] { Stream stream({DeviceType::CUDA, -1}); }, "invalid stream device");
+    Tensor ia({2, 3}, DataType::Int32, Device::cuda(), av);
+    Tensor ib({3, 2}, DataType::Int32, Device::cuda(), bv);
+    Tensor ic({2, 2}, DataType::Int32, Device::cuda(), cv);
+    expect<std::invalid_argument>([&] { matmul(ia, ib, ic); }, "Int32 dispatch");
 #if !FORGE_TEST_CUDA
+    Tensor ha({2, 3}, DataType::Float16, Device::cuda(), av);
+    Tensor hb({3, 2}, DataType::Float16, Device::cuda(), bv);
+    Tensor hc({2, 2}, DataType::Float16, Device::cuda(), cv);
+    expect<std::runtime_error>([&] { matmul(ha, hb, hc); }, "host-only half");
     expect<std::runtime_error>([] { Stream stream; }, "host-only stream");
     expect<std::runtime_error>([&] { matmul_relu(a, b, c); }, "host-only fused dispatch");
     expect<std::runtime_error>([&] { matmul(a, b, c); }, "host-only dispatch");

@@ -32,7 +32,13 @@ int main() {
         Tensor overlap({2, 3}, DataType::Float32, Device::cuda(), av + 1);
         expect<std::invalid_argument>([&] { op(a, overlap); });
         expect<std::invalid_argument>([&] { op(overlap, a); });
+        Tensor ints({2, 3}, DataType::Int32, Device::cuda(), av);
+        Tensor int_out({2, 3}, DataType::Int32, Device::cuda(), bv);
+        expect<std::invalid_argument>([&] { op(ints, int_out); });
 #if !FORGE_TEST_CUDA
+        Tensor half({2, 3}, DataType::Float16, Device::cuda(), av);
+        Tensor half_out({2, 3}, DataType::Float16, Device::cuda(), bv);
+        expect<std::runtime_error>([&] { op(half, half_out); });
         expect<std::runtime_error>([&] { op(a, b); });
 #endif
     }
